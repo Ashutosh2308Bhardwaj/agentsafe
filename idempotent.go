@@ -24,7 +24,9 @@ type IdempotentTool interface {
 	// Identity returns the operation's identity (hashed into the key) and its payload (compared on replay).
 	Identity(args json.RawMessage) (identity, payload any, err error)
 	// CallWithKey performs the effect at most once per key. On a repeated key it must return the original
-	// outcome and must NOT perform the effect again.
+	// outcome and must NOT perform the effect again. That includes CONCURRENT calls with one key: after a
+	// timeout the runner retries while the first call may still be running (exec.go). Return an error
+	// wrapping ErrOutcomeUnknown when you can't tell whether the effect happened (e.g. a 504).
 	CallWithKey(ctx context.Context, key string, args json.RawMessage) (any, error)
 }
 

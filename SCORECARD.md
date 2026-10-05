@@ -2,9 +2,9 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 15 / 35 → 43 / 100** (after step 2.6, sealing + redaction)
+**Current: 16 / 35 → 46 / 100** (after step 2.7, timeouts + panic recovery)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46
 
 ## Correctness (2/5)
 - [x] `go test -race` clean on every package
@@ -13,7 +13,7 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [ ] Coverage ≥ 90% of the core package (baseline 71.8%, now 78.2%)
 - [x] Crash harness (`scripts/money_sweep.sh`: kill -9 at 8 points, reconciled) exits non-zero on failure, wired into CI
 
-## Production blockers (6/9)
+## Production blockers (7/9)
 - [x] Run lease: two processes can't both drive one run. File log: OS lock (flock / LockFileEx), released by the kernel even on kill -9 (`lock_test.go`). Database backends: lease + fencing tokens, verified by the conformance suite in phase 3
 - [ ] Storage interface with SQLite and Postgres backends (separate modules; the core stays dependency-free)
 - [x] Versioned log format with a migration story: every event carries `v`; older events upgraded on read, newer refused (`ErrNewerLogFormat`); golden logs incl. a real v0 run must keep rebuilding ([FORMAT.md](FORMAT.md))
@@ -21,7 +21,7 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [x] Tamper-evident log: every line links to the hash of the one before (optional HMAC key); every Read verifies, a tampered run is refused (`ErrTampered`); `Head()` for anchoring the last line (`chain.go`, `chain_test.go`)
 - [x] Approver authorization hook (who may approve what): `authz.go`, `authz_test.go`; refused attempts logged as `approval_denied`; safe default refuses
 - [x] Redaction hook for sensitive tool arguments/results before they're logged. At rest: sealed log (`seal.go`: AES-256-GCM, rotation, crypto-shredding; resume still sees real values). Leaving the process: `Runner.Redact` for console output, `Trace.Redact` before export (`redact.go`)
-- [ ] Per-tool timeouts and panic recovery
+- [x] Per-tool timeouts and panic recovery: `exec.go`, `exec_test.go`; unknown outcome ≠ failure (idempotent: same-key retry, then `ErrInDoubt` with nothing logged; others: model told it's unknown); panics recovered, never auto-retried
 - [ ] Typed field comparison in `Reconcile` (no `"4200" == 4200`)
 
 ## Quality gates (5/7)

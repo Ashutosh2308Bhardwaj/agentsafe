@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Tool is something the model can ask the runner to do.
@@ -25,6 +26,13 @@ type Runner struct {
 	Logf     func(string, ...any) // progress output; nil = silent
 	Redact   Redactor             // masks arguments, results and summaries in Logf output (redact.go); nil = shown as is
 	Hook     func(point string)   // test/chaos hook, called at named points; nil = none
+
+	// Tool calls (exec.go). ToolTimeout bounds each call (a TimeoutTool sets its own); 0 = no limit. When an
+	// IdempotentTool's outcome is unknown (timeout, ErrOutcomeUnknown), it's retried with the same key up to
+	// ToolAttempts times (0 = 3), waiting ToolBackoff (0 = 200ms) and doubling between tries.
+	ToolTimeout  time.Duration
+	ToolAttempts int
+	ToolBackoff  time.Duration
 
 	// Authorizer decides who may approve or reject gated calls. Without one, decisions are refused
 	// (ErrNoAuthorizer) unless AnyApprover is set: a gate anyone can open must be a visible choice.
@@ -212,8 +220,13 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 		return err
 	}
 	r.hook("before_tool_executed")
-	result := r.execute(ctx, tool, c, key)
+	result, err := r.execute(ctx, tool, c, key)
 	r.hook("after_tool_executed") // THE point week 2 had to close: effect done, result not yet logged
+	if err != nil {
+		// In doubt: log nothing. The run is now exactly as after a crash here, and Continue retries the key.
+		r.logf("    ? %s left in doubt: %s", c.Function.Name, r.show(err.Error()))
+		return err
+	}
 	if err := r.emit(st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph}); err != nil {
 		return err
 	}
@@ -263,30 +276,6 @@ func (r *Runner) emit(st *State, e Event) error {
 	}
 	*st = check
 	return nil
-}
-
-func (r *Runner) execute(ctx context.Context, tool Tool, c ToolCall, key string) string {
-	if tool == nil {
-		return errorJSON(fmt.Errorf("no tool named %q", c.Function.Name))
-	}
-	if !json.Valid([]byte(c.Function.Arguments)) {
-		return errorJSON(fmt.Errorf("arguments are not valid JSON: %.80s", c.Function.Arguments))
-	}
-	var out any
-	var err error
-	if it, ok := tool.(IdempotentTool); ok && key != "" {
-		out, err = it.CallWithKey(ctx, key, json.RawMessage(c.Function.Arguments))
-	} else {
-		out, err = tool.Call(ctx, json.RawMessage(c.Function.Arguments))
-	}
-	if err != nil {
-		return errorJSON(err)
-	}
-	b, err := json.Marshal(out)
-	if err != nil {
-		return errorJSON(fmt.Errorf("result not serialisable: %w", err))
-	}
-	return string(b)
 }
 
 func (r *Runner) specs() []ToolSpec {
