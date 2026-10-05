@@ -185,6 +185,11 @@ func BuildTrace(events []Event, agent string) (*Trace, error) {
 				}
 			}
 
+		case EvApprovalDenied:
+			if i, ok := open["approval:"+e.CallID]; ok {
+				spans[i].Events = append(spans[i].Events, SpanEvent{Time: e.Time, Name: "denied: " + e.Decision + " by " + e.By,
+					Attrs: []Attr{{"agentsafe.approval.denied_reason", e.Reason}}})
+			}
 		case EvRunPaused:
 			root.Events = append(root.Events, SpanEvent{Time: e.Time, Name: "paused: " + e.Reason})
 		case EvBudgetExtended:

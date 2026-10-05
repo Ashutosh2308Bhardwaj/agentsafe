@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// EventType is what happened. These ten types are the whole vocabulary of a run.
+// EventType is what happened. These eleven types are the whole vocabulary of a run.
 type EventType string
 
 // The event types. A run's log is a sequence of these and nothing else.
@@ -26,6 +26,7 @@ const (
 	EvToolRefused       EventType = "tool_refused"       // a pending call resolved WITHOUT being attempted: failed validation, or rejected
 	EvApprovalRequested EventType = "approval_requested" // a gated call is waiting for a human: the run is paused, durably
 	EvApprovalDecided   EventType = "approval_decided"   // approved or rejected, by whom, why
+	EvApprovalDenied    EventType = "approval_denied"    // a decision the Authorizer refused (format v2): who tried, and why not
 )
 
 // Event is one line of the log. Fields are used per type; the rest are omitted.
@@ -43,10 +44,10 @@ type Event struct {
 	Provider string `json:"provider,omitempty"`  // e.g. "groq": so a trace can be built from the log alone
 	Model    string `json:"model,omitempty"`
 
-	// run_paused / budget_extended
+	// run_paused / budget_extended / approvals
 	Reason     string `json:"reason,omitempty"`
 	ExtraSteps int    `json:"extra_steps,omitempty"`
-	By         string `json:"by,omitempty"` // who extended it
+	By         string `json:"by,omitempty"` // who extended, decided, or (run_started, v2) started the run
 
 	// model_decided
 	Step         int      `json:"step,omitempty"`

@@ -25,6 +25,13 @@ type Runner struct {
 	Logf     func(string, ...any) // progress output; nil = silent
 	Hook     func(point string)   // test/chaos hook, called at named points; nil = none
 
+	// Authorizer decides who may approve or reject gated calls. Without one, decisions are refused
+	// (ErrNoAuthorizer) unless AnyApprover is set: a gate anyone can open must be a visible choice.
+	Authorizer  Authorizer
+	AnyApprover bool
+	// StartedBy records who started the run (an identity your system verified); NotRequester uses it.
+	StartedBy string
+
 	// Unlocked runs without a single-driver guarantee when the Log doesn't implement Locker. Off by default:
 	// running a run from two processes at once must be a visible choice, not a silent gap.
 	Unlocked bool
@@ -49,7 +56,7 @@ func (r *Runner) Start(ctx context.Context, system, task string) (State, error) 
 		max = 8
 	}
 	st := NewState()
-	start := Event{Type: EvRunStarted, System: system, Task: task, MaxSteps: max}
+	start := Event{Type: EvRunStarted, System: system, Task: task, MaxSteps: max, By: r.StartedBy}
 	if d, ok := r.Model.(Describer); ok {
 		start.Provider, start.Model = d.Describe()
 	}

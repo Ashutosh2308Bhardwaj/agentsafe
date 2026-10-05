@@ -58,7 +58,8 @@ func payRun(t *testing.T, args ...string) (*Runner, *payTool) {
 		plan = append(plan, FunctionCall{Name: "pay", Arguments: a})
 	}
 	return &Runner{Model: &ScriptedModel{Plan: plan, Final: "done"}, Tools: []Tool{tool},
-		Log: &FileLog{Path: filepath.Join(t.TempDir(), "run.jsonl")}, MaxSteps: 8}, tool
+		Log: &FileLog{Path: filepath.Join(t.TempDir(), "run.jsonl")}, MaxSteps: 8,
+		Authorizer: AllowList("ops@test"), StartedBy: "scheduler"}, tool
 }
 
 func TestGatedCallWaitsDurablyThenRunsOnceOnApproval(t *testing.T) {
@@ -72,7 +73,7 @@ func TestGatedCallWaitsDurablyThenRunsOnceOnApproval(t *testing.T) {
 	}
 	key := st.Waiting.Key
 	// A brand-new Runner (different process, days later) sees the same pending approval.
-	r2 := &Runner{Model: r.Model, Tools: r.Tools, Log: r.Log}
+	r2 := &Runner{Model: r.Model, Tools: r.Tools, Log: r.Log, Authorizer: r.Authorizer}
 	if st2, _ := r2.Continue(context.Background()); st2.Status != StatusAwaitingApproval || st2.Waiting.Key != key {
 		t.Fatalf("approval wait must survive a restart: %+v", st2.Waiting)
 	}

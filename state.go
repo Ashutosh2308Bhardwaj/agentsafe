@@ -35,6 +35,8 @@ type State struct {
 	Approvals map[string]string
 	ByKey     map[string]string
 	Waiting   *Waiting // set while awaiting_approval
+	Denials   int      // refused approval attempts (approval_denied), for audit
+	StartedBy string   // who started the run (Runner.StartedBy), for separation of duties
 
 	// Effects indexes every completed idempotent call by key: the log IS the idempotency store for
 	// outcomes it has seen. (Outcomes it never saw, after a crash mid-call, are the tool's job: it gets the key.)
@@ -107,7 +109,7 @@ func (s *State) Apply(e Event) error {
 			return fmt.Errorf("run_started without a budget (max_steps)")
 		}
 		s.Messages = []Message{{Role: RoleSystem, Content: Str(e.System)}, {Role: RoleUser, Content: Str(e.Task)}}
-		s.Budget = e.MaxSteps
+		s.Budget, s.StartedBy = e.MaxSteps, e.By
 		s.Status = StatusAwaitingModel
 
 	case EvModelDecided:
@@ -220,6 +222,15 @@ func (s *State) Apply(e Event) error {
 		}
 		s.Approvals[e.CallID], s.ByKey[e.Key] = e.Decision, e.Decision
 		s.Waiting, s.Status = nil, StatusExecuting
+
+	case EvApprovalDenied:
+		if s.Status != StatusAwaitingApproval || s.Waiting == nil || e.CallID != s.Waiting.CallID || e.Key != s.Waiting.Key {
+			return fmt.Errorf("approval_denied for %q/%q, but the run isn't waiting on it", e.CallID, e.Key)
+		}
+		if e.By == "" {
+			return fmt.Errorf("approval_denied needs who tried (by)")
+		}
+		s.Denials++ // the run keeps waiting: a refused attempt changes nothing but the record
 
 	case EvRunPaused:
 		if s.Status != StatusAwaitingModel {

@@ -26,9 +26,11 @@ The model can't tell "failed" from "succeeded but unconfirmed", and it isn't its
 ## The primitives
 
 ```go
-r := &agentsafe.Runner{Model: model, Tools: tools, Log: &agentsafe.FileLog{Path: "run.jsonl"}, MaxSteps: 12}
+r := &agentsafe.Runner{Model: model, Tools: tools, Log: &agentsafe.FileLog{Path: "run.jsonl"}, MaxSteps: 12,
+	StartedBy:  "scheduler",                                                      // who asked for the run
+	Authorizer: agentsafe.All(agentsafe.AllowList("ops@company"), agentsafe.NotRequester())} // who may decide
 st, err := r.Start(ctx, system, task)     // or r.Continue(ctx) after a crash, in any process
-r.Approve(ctx, key, "ops@company")         // a gated call waits durably until someone decides
+r.Approve(ctx, key, "ops@company")         // a gated call waits durably until someone ALLOWED decides
 rep := agentsafe.Reconcile(expected, actual, events, claims)   // did it do what it claimed?
 ```
 
@@ -37,7 +39,7 @@ rep := agentsafe.Reconcile(expected, actual, events, claims)   // did it do what
 | **Event log + state machine** | Every decision and result is fsync'd **before** anything acts on it. State is rebuilt from the log; the runner holds none. A transition function rejects impossible histories: finishing with a call unresolved, a result for something never started, a second result for one call, skipping an approval. | `eventlog.go`, `state.go`, `runner.go` |
 | **Idempotent tools** | A write tool declares which fields *define* the operation. The key is derived from those, never the model's call id and never free text. A repeat is replayed from the log, same key + different values is a conflict (never an upsert), and the key is passed **into** the effect so a crash between "done" and "logged" can't double it. | `idempotent.go` |
 | **Pre-write validation** | `Validate` checks every consequential value against the source **before** anything runs or anyone is asked. The refusal says what the source says, so the model fixes it in one step. | `gate.go` |
-| **Approval gate** | Irreversible calls pause as `awaiting_approval` in the log. Approve or reject later, from any process, addressed by the operation's key. Approving twice is a no-op; a decision can't be flipped; the approver sees validated values only. | `gate.go` |
+| **Approval gate** | Irreversible calls pause as `awaiting_approval` in the log. Approve or reject later, from any process, addressed by the operation's key. Approving twice is a no-op; a decision can't be flipped; the approver sees validated values only. An `Authorizer` decides who may approve or reject (allowlist, maker-checker, amount thresholds); with none set, every decision is refused, and refused attempts are logged. | `gate.go`, `authz.go` |
 | **Budget as a pause** | Running out of steps pauses the run instead of ending it; extending it is a logged decision with who made it. | `state.go` |
 | **Traces from the log** | OpenTelemetry GenAI-convention spans (`invoke_agent`, `chat`, `execute_tool`) *derived* from the log, so the trace can't disagree with it, and the same log gives the same trace. OTLP/JSON export. | `trace.go`, `cmd/trace` |
 | **Reconciliation** | Compares **what should exist** (computed from source data by plain code), **what the log says**, and **what the systems of record hold**: field by field, every payment tied to exactly one approval. | `check.go` |

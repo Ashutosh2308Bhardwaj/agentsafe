@@ -17,9 +17,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
@@ -79,6 +81,7 @@ func main() {
 	if os.Getenv("NO_IDEMPOTENCY") == "1" { // control experiment: the same write, without the key
 		write = plainTool{write}
 	}
+	who := identity()
 	r := &agentsafe.Runner{
 		Model:    model,
 		Tools:    []agentsafe.Tool{&ReadCSV{Dir: filepath.Join(here, "data")}, &CompareRows{Dir: filepath.Join(here, "data")}, write, &SendPayout{Dir: filepath.Join(here, "data"), Gateway: gw}},
@@ -87,6 +90,12 @@ func main() {
 		Scope:    batch(filepath.Join(here, "data")), // same input files = same operations, across runs
 		Logf:     logf,
 		Hook:     killHookFn, // KILL_AT=<point> KILL_NTH=<k>: SIGKILL the k-th time the point is reached
+		// Who decides, and who may. The identity comes from the OS account (uid), not $USER, which anyone can
+		// set; the policy comes from separate config. Never derive both from the same input: if the allowlist
+		// were "cli:"+$USER, then USER=anyone would pass by definition. In production, identity comes from your
+		// SSO/API auth and the policy from config the approver can't edit.
+		StartedBy:  "scheduler", // runs are started by the system; a human approves (maker-checker)
+		Authorizer: agentsafe.All(agentsafe.AllowList(approvers(who)...), agentsafe.NotRequester()),
 	}
 	var st agentsafe.State
 	var err error
@@ -99,7 +108,6 @@ func main() {
 		printReconciliation(filepath.Join(here, "data"), ledger, gw, r.Log, st)
 		return
 	}
-	who := "cli:" + os.Getenv("USER")
 	switch {
 	case *approve != "":
 		fmt.Printf("[%s] APPROVE %s\n", *runID, *approve)
@@ -248,6 +256,22 @@ func v(p *float64) any {
 }
 
 func logf(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+
+// identity is the verified approver: the OS account running this process, looked up by uid.
+func identity() string {
+	u, err := user.Current()
+	must(err)
+	return "cli:" + u.Username
+}
+
+// approvers is the approval policy: AGENTSAFE_APPROVERS (comma-separated identities), or, for this demo,
+// just the OS account running it.
+func approvers(self string) []string {
+	if v := os.Getenv("AGENTSAFE_APPROVERS"); v != "" {
+		return strings.Split(v, ",")
+	}
+	return []string{self}
+}
 
 func must(err error) {
 	if err != nil {

@@ -11,6 +11,7 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 | 0 | first release | (no `v` field) |
 | 1 | step 2.2 | adds `v`; otherwise identical to 0 |
 | 1 | step 2.4 | adds optional `prev` (hash chain, see `chain.go`). No version bump: rule 2 below. A log may start unchained (older lines) and become chained; once chained, a missing link is tampering. **Consequence:** don't let a library older than this append to a chained log; its unlinked lines would read as tampering. |
+| 2 | step 2.5 | adds the `approval_denied` event (an Authorizer refused a decision: `by`, `decision`, `key`, and `reason` = why it was refused) and `run_started.by` (who started the run, for maker-checker). Bumped, not rule 2: a v1 library would reject `approval_denied` as an unknown type, and must not skip it, since it's an audit fact. v1 events read unchanged. |
 
 ## Reading
 
@@ -29,3 +30,4 @@ Current golden logs:
 - `golden_v0_real_gateway_crash.jsonl`: a real `openai/gpt-oss-120b` run with a grounding refusal, an approval, and a kill -9 right after the payment gateway charged.
 - `golden_v1_scripted_approved.jsonl`: the scripted example through its approval gate.
 - `golden_v1_chained_approved.jsonl`: the same, with the hash chain on every line.
+- `golden_v2_denied_then_approved.jsonl`: the example's approval refused twice by its Authorizer (approver not on the list), then approved by an allowed approver.

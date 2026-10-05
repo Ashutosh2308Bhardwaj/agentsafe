@@ -2,9 +2,9 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 13 / 35 → 37 / 100** (after step 2.4, hash chain)
+**Current: 14 / 35 → 40 / 100** (after step 2.5, approver authorization)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40
 
 ## Correctness (2/5)
 - [x] `go test -race` clean on every package
@@ -19,7 +19,7 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [x] Versioned log format with a migration story: every event carries `v`; older events upgraded on read, newer refused (`ErrNewerLogFormat`); golden logs incl. a real v0 run must keep rebuilding ([FORMAT.md](FORMAT.md))
 - [x] Recovery from a torn last line (power loss mid-append): unacknowledged tail dropped and repaired on next append; damage before valid lines refused (`ErrCorruptLog`); proven by cutting a real log at every byte (`torn_test.go`)
 - [x] Tamper-evident log: every line links to the hash of the one before (optional HMAC key); every Read verifies, a tampered run is refused (`ErrTampered`); `Head()` for anchoring the last line (`chain.go`, `chain_test.go`)
-- [ ] Approver authorization hook (who may approve what)
+- [x] Approver authorization hook (who may approve what): `authz.go`, `authz_test.go`; refused attempts logged as `approval_denied`; safe default refuses
 - [ ] Redaction hook for sensitive tool arguments/results before they're logged
 - [ ] Per-tool timeouts and panic recovery
 - [ ] Typed field comparison in `Reconcile` (no `"4200" == 4200`)

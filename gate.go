@@ -53,6 +53,9 @@ func (r *Runner) decide(ctx context.Context, key, decision, by, reason string) (
 	if st.Status != StatusAwaitingApproval || st.Waiting == nil || st.Waiting.Key != key {
 		return st, fmt.Errorf("run is not waiting for approval of %s (status %s)", key, st.Status)
 	}
+	if err := r.authorize(ctx, &st, decision, by, reason); err != nil {
+		return st, err
+	}
 	if err := r.emit(&st, Event{Type: EvApprovalDecided, CallID: st.Waiting.CallID, Key: key,
 		Decision: decision, By: by, Reason: reason}); err != nil {
 		return st, err

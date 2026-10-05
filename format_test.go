@@ -17,6 +17,7 @@ var golden = []struct {
 	status                       Status
 	stop                         string
 	approvedOps, refusedOrMissed int
+	denials                      int
 }{
 	// A real gpt-oss-120b run (week 3) written before format versions existed: a grounding refusal at
 	// step 5, an approval, and a kill -9 right after the gateway charged, then a resume.
@@ -28,6 +29,9 @@ var golden = []struct {
 	// The same flow written with the hash chain ("prev" on every line): freezes the chain's on-disk form.
 	{file: "testdata/golden_v1_chained_approved.jsonl", version: 1,
 		events: 26, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1},
+	// v2: an approval refused twice by the Authorizer (not on the approver list), then approved.
+	{file: "testdata/golden_v2_denied_then_approved.jsonl", version: 2,
+		events: 28, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1, denials: 2},
 }
 
 func TestGoldenLogsStillRebuild(t *testing.T) {
@@ -53,9 +57,9 @@ func TestGoldenLogsStillRebuild(t *testing.T) {
 				}
 			}
 			if st.Events != g.events || st.Step != g.step || len(st.Effects) != g.effects || len(st.Messages) != g.msgs ||
-				st.Status != g.status || st.Stop != g.stop || approved != g.approvedOps {
-				t.Fatalf("rebuilt state changed: events=%d step=%d effects=%d msgs=%d status=%s stop=%s approved=%d",
-					st.Events, st.Step, len(st.Effects), len(st.Messages), st.Status, st.Stop, approved)
+				st.Status != g.status || st.Stop != g.stop || approved != g.approvedOps || st.Denials != g.denials {
+				t.Fatalf("rebuilt state changed: events=%d step=%d effects=%d msgs=%d status=%s stop=%s approved=%d denials=%d",
+					st.Events, st.Step, len(st.Effects), len(st.Messages), st.Status, st.Stop, approved, st.Denials)
 			}
 			if _, err := BuildTrace(events, "golden"); err != nil {
 				t.Fatalf("trace from a golden log: %v", err)
