@@ -201,7 +201,7 @@ func scanLines(data []byte) ([]Event, int64, error) {
 		var e Event
 		if err := json.Unmarshal(bytes.TrimSpace(raw), &e); err != nil {
 			if laterData(lines[i+1:]) {
-				return nil, 0, fmt.Errorf("%w: line %d can't be read and later lines exist: %v", ErrCorruptLog, i+1, err)
+				return nil, 0, fmt.Errorf("%w: line %d can't be read and later lines exist: %w", ErrCorruptLog, i+1, err)
 			}
 			break // the last line, unreadable: a torn write
 		}
