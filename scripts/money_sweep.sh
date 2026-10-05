@@ -16,7 +16,7 @@ go build -o "$bin" ./examples/reconcile || exit 1
 mode=(-mock)
 [[ "${1:-}" == "real" ]] && mode=()
 out=examples/reconcile/out
-stamp=$(date +%H%M%S)
+stamp=$(date +%H%M%S)-$$ # + PID: two sweeps in the same second (CI runs it twice) must not share runs
 points=(
   after_model_call:3 after_model_logged:3 before_tool_executed:3 after_tool_executed:3 after_result_logged:3
   approval_requested:1 # dies the moment it asks for approval
