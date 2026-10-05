@@ -1,0 +1,9 @@
+{
+  "_what": "Planted differences between ledger.csv (payouts we sent) and bank.csv (bank settlement). Exactly these 4.",
+  "discrepancies": [
+    {"txn_id": "T1004", "kind": "amount_mismatch",   "ledger_amount": 4200,  "bank_amount": 4020},
+    {"txn_id": "T1006", "kind": "duplicate_in_bank", "ledger_amount": 7300,  "bank_amount": 7300},
+    {"txn_id": "T1007", "kind": "missing_in_bank",   "ledger_amount": 11000, "bank_amount": null},
+    {"txn_id": "T1011", "kind": "missing_in_ledger", "ledger_amount": null,  "bank_amount": 3000}
+  ]
+}
