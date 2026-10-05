@@ -6,17 +6,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // Gateway is a fake payout gateway, file-backed so it survives our process being killed: it is "someone
 // else's system". It supports the two things the outbox pattern needs from a real one:
-//   - Pay is idempotent on an Idempotency-Key: the same key returns the original payment, never a second one;
-//     the same key with a different amount is a 409 conflict;
+//   - Pay is idempotent on an Idempotency-Key: the same key returns the original payment, never a second one,
+//     however the calls arrive (one after another, after a crash, or at the same moment); the same key with a
+//     different amount is a 409 conflict;
 //   - Status(key) answers "did this payment happen?" when a response was lost.
 //
 // LoseResponses makes the next n Pay calls succeed but return ErrTimeout: the gateway charged, the caller
 // never heard. That is week 1 F13, at the money layer.
 type Gateway struct {
+	// mu makes "seen this key? / record the payment" one step. Without it, simultaneous calls with one key all
+	// pass the check before any of them records (check-then-act). A real gateway gets the same guarantee from
+	// a unique constraint on the key (INSERT ... ON CONFLICT); this one lives in-process, so a mutex does.
+	mu sync.Mutex
+
 	Path          string
 	LoseResponses int
 	OnCharged     func() // test/chaos hook: called after a payment is durably recorded, before returning
@@ -64,6 +71,8 @@ func (g *Gateway) save(m map[string]Payment) error {
 
 // Pay charges once per key.
 func (g *Gateway) Pay(key, payee string, amount float64, ref string) (Payment, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	m, err := g.load()
 	if err != nil {
 		return Payment{}, err
