@@ -2,17 +2,19 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 7 / 35 → 20 / 100** (baseline, 2026-10-05)
+**Current: 10 / 35 → 29 / 100** (after step 2.1, run lease)
+
+History: baseline 20 → step 2.1 29
 
 ## Correctness (2/5)
 - [x] `go test -race` clean on every package
 - [ ] Fuzz tests: log reader, `Rebuild`, `Canonical`
 - [ ] Property-based tests on the state machine (random event sequences: valid histories rebuild, invalid ones are rejected)
-- [ ] Coverage ≥ 90% of the core package (baseline 71.8%)
+- [ ] Coverage ≥ 90% of the core package (baseline 71.8%, now 73.2%)
 - [x] Crash harness (`scripts/money_sweep.sh`: kill -9 at 8 points, reconciled) exits non-zero on failure, wired into CI
 
-## Production blockers (0/9)
-- [ ] Run lease with fencing: two processes can't both drive one run
+## Production blockers (1/9)
+- [x] Run lease: two processes can't both drive one run. File log: OS lock (flock / LockFileEx), released by the kernel even on kill -9 (`lock_test.go`). Database backends: lease + fencing tokens, verified by the conformance suite in phase 3
 - [ ] Storage interface with SQLite and Postgres backends (separate modules; the core stays dependency-free)
 - [ ] Versioned log format with a migration story
 - [ ] Recovery from a torn last line (power loss mid-append)
@@ -22,14 +24,14 @@
 - [ ] Per-tool timeouts and panic recovery
 - [ ] Typed field comparison in `Reconcile` (no `"4200" == 4200`)
 
-## Quality gates (3/7)
+## Quality gates (5/7)
 - [x] golangci-lint (strict config) clean
 - [x] staticcheck clean
-- [ ] govulncheck clean (baseline: 7 known vulns in the Go 1.24.9 stdlib, none reachable; fixed by toolchain upgrade)
+- [x] govulncheck clean (CI, latest Go)
 - [x] gofmt clean
 - [ ] Go Report Card A+ (needs the public repo)
 - [ ] OpenSSF Scorecard ≥ 8 (needs the public repo, branch protection, pinned actions, SECURITY.md)
-- [ ] CI green on Linux, macOS and Windows (workflow written; not yet run)
+- [x] CI green on Linux, macOS and Windows × Go 1.23 and stable
 
 ## Integration (1/7)
 - [ ] Idiomatic API: context everywhere, functional options, `errors.Is`-able sentinel errors

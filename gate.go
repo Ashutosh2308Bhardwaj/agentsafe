@@ -35,6 +35,11 @@ func (r *Runner) Reject(ctx context.Context, key, by, reason string) (State, err
 }
 
 func (r *Runner) decide(ctx context.Context, key, decision, by, reason string) (State, error) {
+	release, err := r.lock()
+	if err != nil {
+		return State{}, err
+	}
+	defer release()
 	st, err := r.rebuild()
 	if err != nil {
 		return st, err

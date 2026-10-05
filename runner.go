@@ -24,10 +24,19 @@ type Runner struct {
 	Scope    string               // idempotency scope, e.g. a hash of the input files; "" = per log
 	Logf     func(string, ...any) // progress output; nil = silent
 	Hook     func(point string)   // test/chaos hook, called at named points; nil = none
+
+	// Unlocked runs without a single-driver guarantee when the Log doesn't implement Locker. Off by default:
+	// running a run from two processes at once must be a visible choice, not a silent gap.
+	Unlocked bool
 }
 
 // Start begins a new run. It refuses a log that already has events.
 func (r *Runner) Start(ctx context.Context, system, task string) (State, error) {
+	release, err := r.lock()
+	if err != nil {
+		return State{}, err
+	}
+	defer release()
 	events, err := r.Log.Read()
 	if err != nil {
 		return State{}, err
@@ -53,6 +62,11 @@ func (r *Runner) Start(ctx context.Context, system, task string) (State, error) 
 // Extend gives a PAUSED run more model decisions and continues it. The decision is logged with who made it:
 // budget is never raised silently (week 3 S1 review, Q3).
 func (r *Runner) Extend(ctx context.Context, extraSteps int, by string) (State, error) {
+	release, err := r.lock()
+	if err != nil {
+		return State{}, err
+	}
+	defer release()
 	st, err := r.rebuild()
 	if err != nil {
 		return st, err
@@ -65,6 +79,11 @@ func (r *Runner) Extend(ctx context.Context, extraSteps int, by string) (State, 
 
 // Continue rebuilds the run from its log and drives it until it finishes, pauses, or errors.
 func (r *Runner) Continue(ctx context.Context) (State, error) {
+	release, err := r.lock()
+	if err != nil {
+		return State{}, err
+	}
+	defer release()
 	st, err := r.rebuild()
 	if err != nil {
 		return st, err
