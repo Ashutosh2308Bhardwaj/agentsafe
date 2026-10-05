@@ -6,6 +6,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -21,7 +22,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: trace [-otlp out.json] <log.jsonl>")
 		os.Exit(2)
 	}
-	events, err := (&agentsafe.FileLog{Path: flag.Arg(0)}).Read()
+	events, err := (&agentsafe.FileLog{Path: flag.Arg(0), Codec: logCodec()}).Read() // AGENTSAFE_LOG_KEY for sealed logs
 	check(err)
 	t, err := agentsafe.BuildTrace(events, *agent)
 	check(err)
@@ -32,6 +33,21 @@ func main() {
 		check(os.WriteFile(*otlp, b, 0o600)) // traces can carry tool arguments: owner-only
 		fmt.Printf("\nOTLP/JSON: %s (%d spans)\n", *otlp, len(t.Spans))
 	}
+}
+
+// logCodec seals the log when AGENTSAFE_LOG_KEY holds a 32-byte key in hex (e.g. openssl rand -hex 32).
+// The key id is "env"; a real deployment fetches keys from a KMS and rotates them (agentsafe.AESGCM).
+func logCodec() agentsafe.Codec {
+	v := os.Getenv("AGENTSAFE_LOG_KEY")
+	if v == "" {
+		return nil
+	}
+	key, err := hex.DecodeString(v)
+	if err != nil || len(key) != 32 {
+		fmt.Fprintln(os.Stderr, "error: AGENTSAFE_LOG_KEY must be 64 hex characters (32 bytes)")
+		os.Exit(2)
+	}
+	return agentsafe.AESGCM{Keys: map[string][]byte{"env": key}, Current: "env"}
 }
 
 func check(err error) {

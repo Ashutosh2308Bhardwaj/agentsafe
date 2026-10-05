@@ -20,7 +20,7 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [x] Recovery from a torn last line (power loss mid-append): unacknowledged tail dropped and repaired on next append; damage before valid lines refused (`ErrCorruptLog`); proven by cutting a real log at every byte (`torn_test.go`)
 - [x] Tamper-evident log: every line links to the hash of the one before (optional HMAC key); every Read verifies, a tampered run is refused (`ErrTampered`); `Head()` for anchoring the last line (`chain.go`, `chain_test.go`)
 - [x] Approver authorization hook (who may approve what): `authz.go`, `authz_test.go`; refused attempts logged as `approval_denied`; safe default refuses
-- [ ] Redaction hook for sensitive tool arguments/results before they're logged
+- [ ] Redaction hook for sensitive tool arguments/results before they're logged. At rest: done (2.6a, `seal.go`: sealed log, AES-256-GCM, rotation, crypto-shredding). Still open: what leaves the process (console output, trace export), 2.6b
 - [ ] Per-tool timeouts and panic recovery
 - [ ] Typed field comparison in `Reconcile` (no `"4200" == 4200`)
 

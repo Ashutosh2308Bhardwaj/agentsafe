@@ -85,7 +85,7 @@ func main() {
 	r := &agentsafe.Runner{
 		Model:    model,
 		Tools:    []agentsafe.Tool{&ReadCSV{Dir: filepath.Join(here, "data")}, &CompareRows{Dir: filepath.Join(here, "data")}, write, &SendPayout{Dir: filepath.Join(here, "data"), Gateway: gw}},
-		Log:      &agentsafe.FileLog{Path: filepath.Join(out, *runID+"-log.jsonl")},
+		Log:      &agentsafe.FileLog{Path: filepath.Join(out, *runID+"-log.jsonl"), Codec: logCodec()}, // AGENTSAFE_LOG_KEY: sealed at rest
 		MaxSteps: *maxSteps,
 		Scope:    batch(filepath.Join(here, "data")), // same input files = same operations, across runs
 		Logf:     logf,
@@ -271,6 +271,21 @@ func approvers(self string) []string {
 		return strings.Split(v, ",")
 	}
 	return []string{self}
+}
+
+// logCodec seals the log when AGENTSAFE_LOG_KEY holds a 32-byte key in hex (e.g. openssl rand -hex 32).
+// The key id is "env"; a real deployment fetches keys from a KMS and rotates them (agentsafe.AESGCM).
+func logCodec() agentsafe.Codec {
+	v := os.Getenv("AGENTSAFE_LOG_KEY")
+	if v == "" {
+		return nil
+	}
+	key, err := hex.DecodeString(v)
+	if err != nil || len(key) != 32 {
+		fmt.Fprintln(os.Stderr, "error: AGENTSAFE_LOG_KEY must be 64 hex characters (32 bytes)")
+		os.Exit(2)
+	}
+	return agentsafe.AESGCM{Keys: map[string][]byte{"env": key}, Current: "env"}
 }
 
 func must(err error) {

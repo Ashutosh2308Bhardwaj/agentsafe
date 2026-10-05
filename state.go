@@ -100,6 +100,9 @@ func Rebuild(events []Event) (State, error) {
 //   - tool_started for a call whose approval is pending or was rejected (the gate can't be skipped)
 //   - tool_refused for a call that was already started (it may have run: that needs a tool_result)
 func (s *State) Apply(e Event) error {
+	if e.Sealed != "" {
+		return fmt.Errorf("%w (event %d)", ErrSealed, e.Seq)
+	}
 	switch e.Type {
 	case EvRunStarted:
 		if s.Status != StatusNew {

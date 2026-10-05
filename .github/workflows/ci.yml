@@ -45,3 +45,6 @@ jobs:
         with: { go-version: stable }
       - name: kill -9 at every point of the money flow (scripted model)
         run: ./scripts/money_sweep.sh
+      - name: the same, with the log sealed at rest (a test key, not a secret)
+        run: ./scripts/money_sweep.sh
+        env: { AGENTSAFE_LOG_KEY: 4242424242424242424242424242424242424242424242424242424242424242 }

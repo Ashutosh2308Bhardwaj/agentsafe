@@ -20,4 +20,5 @@ GOTOOLCHAIN="${latest:-auto}" go run golang.org/x/vuln/cmd/govulncheck@latest ./
 step "tests (race)";   go test -race -count=1 ./...
 step coverage;         go test -coverprofile=coverage.out . >/dev/null && go tool cover -func=coverage.out | tail -1
 step "crash harness";  scripts/money_sweep.sh >/dev/null
+step "crash harness (sealed log)"; AGENTSAFE_LOG_KEY=4242424242424242424242424242424242424242424242424242424242424242 scripts/money_sweep.sh >/dev/null
 printf '\nall gates green\n'

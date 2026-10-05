@@ -14,7 +14,7 @@ import (
 //   - an optional field whose absence is harmless may be added without a version bump;
 //   - any change that alters how an existing event must be read bumps FormatVersion and adds an upgrade
 //     step below, plus a golden log in testdata/ that must keep rebuilding to the same state.
-const FormatVersion = 2
+const FormatVersion = 3
 
 // ErrNewerLogFormat is returned for an event written by a newer version of this library. It is refused, not
 // guessed at: Go's JSON decoder silently drops unknown fields, and an old reader that skipped a field which
@@ -26,6 +26,7 @@ var ErrNewerLogFormat = errors.New("agentsafe: event was written in a newer log 
 var upgrades = map[int]func(Event) (Event, error){
 	0: func(e Event) (Event, error) { return e, nil }, // v0 -> v1: adds "v" only
 	1: func(e Event) (Event, error) { return e, nil }, // v1 -> v2: adds the approval_denied event type; v1 events are unchanged
+	2: func(e Event) (Event, error) { return e, nil }, // v2 -> v3: adds "sealed" (seal.go); v2 events are unchanged
 }
 
 // UpgradeAll brings every event to FormatVersion, or refuses the log at the first event it can't read.

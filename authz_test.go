@@ -181,9 +181,9 @@ func TestDenialShowsUpInTheTrace(t *testing.T) {
 	t.Fatal("want a 'denied' span event with the reason on the approval span")
 }
 
-func TestV1LogUpgradesToV2(t *testing.T) {
+func TestV1ApprovalEventsUpgradeUnchanged(t *testing.T) {
 	e, err := Upgrade(Event{V: 1, Type: EvApprovalDecided, Decision: "approved", By: "ops"})
-	if err != nil || e.V != 2 || e.Decision != "approved" || e.By != "ops" {
-		t.Fatalf("v1 events must read unchanged as v2: %+v err=%v", e, err)
+	if err != nil || e.V != FormatVersion || e.Decision != "approved" || e.By != "ops" {
+		t.Fatalf("v1 events must read unchanged at the current version: %+v err=%v", e, err)
 	}
 }

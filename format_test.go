@@ -1,6 +1,7 @@
 package agentsafe
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -18,6 +19,7 @@ var golden = []struct {
 	stop                         string
 	approvedOps, refusedOrMissed int
 	denials                      int
+	codec                        Codec // for sealed logs
 }{
 	// A real gpt-oss-120b run (week 3) written before format versions existed: a grounding refusal at
 	// step 5, an approval, and a kill -9 right after the gateway charged, then a resume.
@@ -32,12 +34,15 @@ var golden = []struct {
 	// v2: an approval refused twice by the Authorizer (not on the approver list), then approved.
 	{file: "testdata/golden_v2_denied_then_approved.jsonl", version: 2,
 		events: 28, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1, denials: 2},
+	// v3: the same flow sealed at rest (AES-256-GCM, test key 0x42 x 32, id "env"); one denial.
+	{file: "testdata/golden_v3_sealed.jsonl", version: 3, codec: AESGCM{Keys: map[string][]byte{"env": bytes.Repeat([]byte{0x42}, 32)}, Current: "env"},
+		events: 27, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1, denials: 1},
 }
 
 func TestGoldenLogsStillRebuild(t *testing.T) {
 	for _, g := range golden {
 		t.Run(g.file, func(t *testing.T) {
-			events, err := (&FileLog{Path: g.file}).Read()
+			events, err := (&FileLog{Path: g.file, Codec: g.codec}).Read()
 			if err != nil {
 				t.Fatal(err)
 			}

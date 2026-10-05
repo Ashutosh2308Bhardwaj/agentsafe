@@ -73,6 +73,10 @@ type Event struct {
 	// run_finished
 	Stop string `json:"stop,omitempty"`
 	Text string `json:"text,omitempty"`
+
+	// Sealed (format v3) holds the content fields above, encrypted by a Codec; they are empty while it is
+	// set. See seal.go.
+	Sealed string `json:"sealed,omitempty"`
 }
 
 // Log is an append-only record of a run. It is the source of truth: state is derived from it (Rebuild),
@@ -99,6 +103,9 @@ type FileLog struct {
 	// Key, if set, makes the chain an HMAC-SHA256 chain: without the key, an attacker who rewrites the whole
 	// file can't recompute the links. Use the same key for a log's whole life; keep it off the log's host.
 	Key []byte
+	// Codec, if set, seals each event's content before it is written and opens it on Read (seal.go). The
+	// chain covers the sealed line, so tampering is still detected without the Codec's keys.
+	Codec Codec
 
 	next int    // next sequence number; 0 = not yet loaded (re-read, and the tail repaired, on next Append)
 	prev string // chain link for the next line: hash of the last acknowledged line
@@ -114,6 +121,12 @@ func (l *FileLog) Append(e Event) error {
 		l.next, l.prev = n+1, l.link(last)
 	}
 	e.Seq, e.Time, e.Prev = l.next, time.Now().UTC(), l.prev
+	if l.Codec != nil {
+		var err error
+		if e, err = Seal(e, l.Codec); err != nil {
+			return err
+		}
+	}
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -137,9 +150,18 @@ func (l *FileLog) Append(e Event) error {
 }
 
 // Read returns every acknowledged event in order, ignoring a torn tail. A missing file is an empty log.
+// Sealed events are opened with the Codec; without it, a sealed log is refused (ErrSealed).
 func (l *FileLog) Read() ([]Event, error) {
 	events, _, _, err := l.load()
-	return events, err
+	if err != nil {
+		return nil, err
+	}
+	for i := range events {
+		if events[i], err = Open(events[i], l.Codec); err != nil {
+			return nil, fmt.Errorf("%s: %w", l.Path, err)
+		}
+	}
+	return events, nil
 }
 
 // repair cuts a torn tail off the file, so the next line isn't glued onto half a line, and returns the
