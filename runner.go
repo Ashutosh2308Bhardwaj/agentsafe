@@ -233,6 +233,7 @@ func (r *Runner) find(name string) Tool {
 // emit validates the event against the state machine, THEN persists it, THEN applies it. An event the
 // state machine rejects is never written; an event that fails to write never changes the state.
 func (r *Runner) emit(st *State, e Event) error {
+	e.V = FormatVersion
 	check := *st
 	check.Started = copyMap(st.Started)
 	check.Pending = append([]ToolCall(nil), st.Pending...)

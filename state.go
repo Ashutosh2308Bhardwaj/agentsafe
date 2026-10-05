@@ -63,6 +63,10 @@ func NewState() State {
 func Rebuild(events []Event) (State, error) {
 	s := NewState()
 	for _, e := range events {
+		e, err := Upgrade(e) // older formats are upgraded; newer ones are refused, never guessed at
+		if err != nil {
+			return s, err
+		}
 		if err := s.Apply(e); err != nil {
 			return s, fmt.Errorf("event %d (%s): %w", e.Seq, e.Type, err)
 		}

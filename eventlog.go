@@ -30,6 +30,7 @@ const (
 
 // Event is one line of the log. Fields are used per type; the rest are omitted.
 type Event struct {
+	V    int       `json:"v,omitempty"` // log format version (FormatVersion); absent = 0, written before versions existed
 	Seq  int       `json:"seq"`
 	Type EventType `json:"type"`
 	Time time.Time `json:"time"`

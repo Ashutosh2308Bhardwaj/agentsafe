@@ -72,6 +72,9 @@ func BuildTrace(events []Event, agent string) (*Trace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("log is not a valid run: %w", err)
 	}
+	if events, err = UpgradeAll(events); err != nil {
+		return nil, err
+	}
 	if len(events) == 0 || events[0].Type != EvRunStarted {
 		return nil, fmt.Errorf("log does not start with run_started")
 	}

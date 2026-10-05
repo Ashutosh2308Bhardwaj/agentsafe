@@ -76,6 +76,12 @@ func Reconcile(expected, actual []Effect, events []Event, claims []Claim) Report
 	add := func(s Severity, check, f string, a ...any) {
 		rep.Findings = append(rep.Findings, Finding{s, check, fmt.Sprintf(f, a...)})
 	}
+	if up, err := UpgradeAll(events); err != nil {
+		add(Critical, "log", "the run's log can't be read, so nothing in it can be trusted: %v", err)
+		events = nil
+	} else {
+		events = up
+	}
 
 	byID := map[string][]Effect{}
 	for _, e := range actual {
