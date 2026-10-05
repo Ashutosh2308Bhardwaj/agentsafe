@@ -1,0 +1,4 @@
+# Golden logs and event logs are evidence: their exact bytes are hashed (chain.go). Never let git
+# rewrite line endings in them, on any platform.
+testdata/** -text
+*.jsonl -text

@@ -1,6 +1,7 @@
 package agentsafe
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -28,6 +29,12 @@ const genesis = "genesis"
 //
 // Logs written before the chain existed have no "prev". That is accepted as an unchained prefix; the chain
 // starts at the first linked line, and from then on a missing link is tampering.
+
+// lineContent is what the chain hashes: a stored line without its line ending. "\r\n" is stripped as well as
+// "\n", so a log whose line endings were converted (e.g. by git on Windows) still verifies.
+func lineContent(raw []byte) []byte {
+	return bytes.TrimRight(raw, "\r\n")
+}
 
 func (l *FileLog) hash(line []byte) string {
 	if l.Key != nil {

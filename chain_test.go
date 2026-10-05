@@ -57,7 +57,7 @@ func TestEveryLineLinksToTheOneBefore(t *testing.T) {
 	for i, e := range events {
 		want := genesis
 		if i > 0 {
-			h := sha256.Sum256(bytes.TrimRight(ls[i-1], "\n"))
+			h := sha256.Sum256(lineContent(ls[i-1]))
 			want = hex.EncodeToString(h[:])
 		}
 		if e.Prev != want {
@@ -65,7 +65,7 @@ func TestEveryLineLinksToTheOneBefore(t *testing.T) {
 		}
 	}
 	head, _ := (&FileLog{Path: path}).Head()
-	h := sha256.Sum256(bytes.TrimRight(ls[len(ls)-1], "\n"))
+	h := sha256.Sum256(lineContent(ls[len(ls)-1]))
 	if head != hex.EncodeToString(h[:]) {
 		t.Fatal("Head must be the hash of the last line")
 	}
@@ -126,7 +126,7 @@ func pausedForApproval(t *testing.T, key []byte) (*Runner, *payTool, State) {
 func forgeApproval(t *testing.T, path string, st State) {
 	t.Helper()
 	ls := lines(t, path)
-	h := sha256.Sum256(bytes.TrimRight(ls[len(ls)-1], "\n"))
+	h := sha256.Sum256(lineContent(ls[len(ls)-1]))
 	forged, _ := json.Marshal(Event{V: FormatVersion, Seq: len(ls) + 1, Type: EvApprovalDecided, Time: time.Now().UTC(),
 		Prev: hex.EncodeToString(h[:]), CallID: st.Waiting.CallID, Key: st.Waiting.Key, Decision: "approved", By: "cfo"})
 	write(t, path, append(ls, append(forged, '\n')))
@@ -179,7 +179,7 @@ func TestLegacyUnchainedLogContinuesTheChain(t *testing.T) {
 		t.Fatalf("an unchained prefix followed by a chained line must read: %v", err)
 	}
 	ls := lines(t, path)
-	h := sha256.Sum256(bytes.TrimRight(ls[len(ls)-2], "\n"))
+	h := sha256.Sum256(lineContent(ls[len(ls)-2]))
 	if last := events[len(events)-1]; last.Prev != hex.EncodeToString(h[:]) {
 		t.Fatal("the first chained line must link to the last legacy line")
 	}
@@ -190,5 +190,23 @@ func TestReadingAKeyedLogWithoutTheKeyFails(t *testing.T) {
 	_, err := (&FileLog{Path: r.Log.(*FileLog).Path}).Read()
 	if !errors.Is(err, ErrTampered) || !strings.Contains(err.Error(), "link") {
 		t.Fatalf("a keyed log read with no or the wrong key can't be verified, got %v", err)
+	}
+}
+
+func TestConvertedLineEndingsStillVerify(t *testing.T) {
+	// git on Windows (core.autocrlf) rewrites "\n" to "\r\n" on checkout. A chained log must still verify,
+	// and still continue the chain, after that.
+	path := chainedRun(t)
+	data, _ := os.ReadFile(path)
+	_ = os.WriteFile(path, bytes.ReplaceAll(data, []byte("\n"), []byte("\r\n")), 0o600)
+	l := &FileLog{Path: path}
+	if _, err := l.Read(); err != nil {
+		t.Fatalf("CRLF line endings must not read as tampering: %v", err)
+	}
+	if err := l.Append(Event{Type: EvRunFinished, Stop: "after-crlf"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&FileLog{Path: path}).Read(); err != nil {
+		t.Fatalf("a line appended after CRLF conversion must link correctly: %v", err)
 	}
 }

@@ -223,7 +223,7 @@ func scanLines(data []byte) ([]Event, [][]byte, int64, error) {
 			break // the last line, unreadable: a torn write
 		}
 		events = append(events, e)
-		kept = append(kept, bytes.TrimRight(raw, "\r\n"))
+		kept = append(kept, lineContent(raw))
 		good += int64(len(raw))
 	}
 	return events, kept, good, nil
