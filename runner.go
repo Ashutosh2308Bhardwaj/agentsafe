@@ -23,6 +23,7 @@ type Runner struct {
 	MaxSteps int                  // budget for a NEW run (logged in run_started); 0 = 8. Resumes use the logged budget.
 	Scope    string               // idempotency scope, e.g. a hash of the input files; "" = per log
 	Logf     func(string, ...any) // progress output; nil = silent
+	Redact   Redactor             // masks arguments, results and summaries in Logf output (redact.go); nil = shown as is
 	Hook     func(point string)   // test/chaos hook, called at named points; nil = none
 
 	// Authorizer decides who may approve or reject gated calls. Without one, decisions are refused
@@ -192,7 +193,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 			if err := r.emit(st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph, Replayed: true}); err != nil {
 				return err
 			}
-			r.logf("    %s(%.60s) -> %s from the log: %.80s", c.Function.Name, c.Function.Arguments, how, result)
+			r.logf("    %s(%.60s) -> %s from the log: %.80s", c.Function.Name, r.show(c.Function.Arguments), how, r.show(result))
 			r.hook("after_result_logged")
 			return nil
 		}
@@ -216,7 +217,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 	if err := r.emit(st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph}); err != nil {
 		return err
 	}
-	r.logf("    %s(%.70s) -> %.90s", c.Function.Name, c.Function.Arguments, result)
+	r.logf("    %s(%.70s) -> %.90s", c.Function.Name, r.show(c.Function.Arguments), r.show(result))
 	r.hook("after_result_logged")
 	return nil
 }

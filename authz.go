@@ -96,6 +96,6 @@ func (r *Runner) authorize(ctx context.Context, st *State, decision, by, reason 
 		Decision: decision, By: by, Reason: err.Error()}); lerr != nil {
 		return fmt.Errorf("recording a refused approval: %w (refusal: %w)", lerr, err)
 	}
-	r.logf("[%s: %s by %s DENIED: %v]", st.Waiting.Key, decision, by, err)
+	r.logf("[%s: %s by %s DENIED: %s]", st.Waiting.Key, decision, by, r.show(err.Error()))
 	return fmt.Errorf("%w: %w", ErrNotAuthorized, err)
 }

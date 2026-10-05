@@ -3,6 +3,7 @@
 //
 //	go run ./cmd/trace examples/reconcile/out/p1-log.jsonl                 print the run as a tree
 //	go run ./cmd/trace -otlp trace.json examples/reconcile/out/p1-log.jsonl   also write OTLP/JSON
+//	go run ./cmd/trace -redact payee -otlp trace.json ...                       mask fields before export
 package main
 
 import (
@@ -10,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
@@ -17,6 +19,7 @@ import (
 func main() {
 	otlp := flag.String("otlp", "", "write OTLP/JSON (ExportTraceServiceRequest) to this file")
 	agent := flag.String("agent", "reconcile", "gen_ai.agent.name for the root span")
+	redact := flag.String("redact", "", "comma-separated JSON fields to mask before printing or exporting, e.g. payee,account")
 	flag.Parse()
 	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: trace [-otlp out.json] <log.jsonl>")
@@ -26,6 +29,9 @@ func main() {
 	check(err)
 	t, err := agentsafe.BuildTrace(events, *agent)
 	check(err)
+	if *redact != "" {
+		t.Redact(agentsafe.RedactFields(strings.Split(*redact, ",")...))
+	}
 	fmt.Print(t.Tree())
 	if *otlp != "" {
 		b, err := t.OTLPJSON("agentsafe-" + *agent)

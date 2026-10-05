@@ -72,7 +72,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 	if v, ok := tool.(Validator); ok && !st.Started[c.ID] {
 		if verr := v.Validate(ctx, args); verr != nil {
 			res := errorJSON(fmt.Errorf("refused before execution: %w", verr))
-			r.logf("    ✗ %s(%.60s) refused: %v", c.Function.Name, c.Function.Arguments, verr)
+			r.logf("    ✗ %s(%.60s) refused: %s", c.Function.Name, r.show(c.Function.Arguments), r.show(verr.Error()))
 			return false, r.emit(st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
 		}
 	}
@@ -98,7 +98,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 	if err := r.emit(st, Event{Type: EvApprovalRequested, CallID: c.ID, Tool: c.Function.Name, Key: key, Summary: string(b)}); err != nil {
 		return false, err
 	}
-	r.logf("[awaiting approval] %s %s\n    key=%s  →  Approve or Reject by key", c.Function.Name, b, key)
+	r.logf("[awaiting approval] %s %s\n    key=%s  →  Approve or Reject by key", c.Function.Name, r.show(string(b)), key)
 	r.hook("approval_requested")
 	return false, nil
 }

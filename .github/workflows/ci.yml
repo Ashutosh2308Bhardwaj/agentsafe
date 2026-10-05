@@ -47,4 +47,4 @@ jobs:
         run: ./scripts/money_sweep.sh
       - name: the same, with the log sealed at rest (a test key, not a secret)
         run: ./scripts/money_sweep.sh
-        env: { AGENTSAFE_LOG_KEY: 4242424242424242424242424242424242424242424242424242424242424242 }
+        env: { AGENTSAFE_LOG_KEY: "4242424242424242424242424242424242424242424242424242424242424242" } # quoted: unquoted, YAML reads 64 digits as a float

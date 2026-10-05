@@ -89,7 +89,8 @@ func main() {
 		MaxSteps: *maxSteps,
 		Scope:    batch(filepath.Join(here, "data")), // same input files = same operations, across runs
 		Logf:     logf,
-		Hook:     killHookFn, // KILL_AT=<point> KILL_NTH=<k>: SIGKILL the k-th time the point is reached
+		Redact:   agentsafe.RedactFields("payee"), // payee names never reach the console
+		Hook:     killHookFn,                      // KILL_AT=<point> KILL_NTH=<k>: SIGKILL the k-th time the point is reached
 		// Who decides, and who may. The identity comes from the OS account (uid), not $USER, which anyone can
 		// set; the policy comes from separate config. Never derive both from the same input: if the allowlist
 		// were "cli:"+$USER, then USER=anyone would pass by definition. In production, identity comes from your
@@ -143,6 +144,8 @@ func main() {
 	fmt.Println("   (truth: exactly 1, Imran Khan ₹11000 ref=T1007, once approved)")
 	printReconciliation(filepath.Join(here, "data"), ledger, gw, r.Log, st)
 	if st.Status == agentsafe.StatusAwaitingApproval {
+		// The approval screen, for the approver: the full summary, payee included (you can't approve a payment
+		// without seeing whom it pays). Logf output is masked because logs ship to aggregators and vendors.
 		fmt.Printf("\n⏸  WAITING FOR APPROVAL: %s %s\n\n   to approve, run:\n   go run ./examples/reconcile -run %s -approve %s\n\n   to reject, run:\n   go run ./examples/reconcile -run %s -reject %s -reason \"why\"\n",
 			st.Waiting.Tool, st.Waiting.Summary, *runID, st.Waiting.Key, *runID, st.Waiting.Key)
 	}
