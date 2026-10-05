@@ -2,23 +2,23 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 12 / 35 → 34 / 100** (after step 2.3, torn-tail recovery)
+**Current: 13 / 35 → 37 / 100** (after step 2.4, hash chain)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37
 
 ## Correctness (2/5)
 - [x] `go test -race` clean on every package
 - [ ] Fuzz tests: log reader, `Rebuild`, `Canonical`
 - [ ] Property-based tests on the state machine (random event sequences: valid histories rebuild, invalid ones are rejected)
-- [ ] Coverage ≥ 90% of the core package (baseline 71.8%, now 77.1%)
+- [ ] Coverage ≥ 90% of the core package (baseline 71.8%, now 78.2%)
 - [x] Crash harness (`scripts/money_sweep.sh`: kill -9 at 8 points, reconciled) exits non-zero on failure, wired into CI
 
-## Production blockers (3/9)
+## Production blockers (4/9)
 - [x] Run lease: two processes can't both drive one run. File log: OS lock (flock / LockFileEx), released by the kernel even on kill -9 (`lock_test.go`). Database backends: lease + fencing tokens, verified by the conformance suite in phase 3
 - [ ] Storage interface with SQLite and Postgres backends (separate modules; the core stays dependency-free)
 - [x] Versioned log format with a migration story: every event carries `v`; older events upgraded on read, newer refused (`ErrNewerLogFormat`); golden logs incl. a real v0 run must keep rebuilding ([FORMAT.md](FORMAT.md))
 - [x] Recovery from a torn last line (power loss mid-append): unacknowledged tail dropped and repaired on next append; damage before valid lines refused (`ErrCorruptLog`); proven by cutting a real log at every byte (`torn_test.go`)
-- [ ] Tamper-evident log (hash chain), verifiable offline
+- [x] Tamper-evident log: every line links to the hash of the one before (optional HMAC key); every Read verifies, a tampered run is refused (`ErrTampered`); `Head()` for anchoring the last line (`chain.go`, `chain_test.go`)
 - [ ] Approver authorization hook (who may approve what)
 - [ ] Redaction hook for sensitive tool arguments/results before they're logged
 - [ ] Per-tool timeouts and panic recovery

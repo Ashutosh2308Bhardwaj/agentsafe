@@ -10,6 +10,7 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 |---|---|---|
 | 0 | first release | (no `v` field) |
 | 1 | step 2.2 | adds `v`; otherwise identical to 0 |
+| 1 | step 2.4 | adds optional `prev` (hash chain, see `chain.go`). No version bump: rule 2 below. A log may start unchained (older lines) and become chained; once chained, a missing link is tampering. **Consequence:** don't let a library older than this append to a chained log; its unlinked lines would read as tampering. |
 
 ## Reading
 
@@ -27,3 +28,4 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 Current golden logs:
 - `golden_v0_real_gateway_crash.jsonl`: a real `openai/gpt-oss-120b` run with a grounding refusal, an approval, and a kill -9 right after the payment gateway charged.
 - `golden_v1_scripted_approved.jsonl`: the scripted example through its approval gate.
+- `golden_v1_chained_approved.jsonl`: the same, with the hash chain on every line.

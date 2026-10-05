@@ -25,6 +25,9 @@ var golden = []struct {
 	// The scripted example with an approval, written in format v1.
 	{file: "testdata/golden_v1_scripted_approved.jsonl", version: 1,
 		events: 26, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1},
+	// The same flow written with the hash chain ("prev" on every line): freezes the chain's on-disk form.
+	{file: "testdata/golden_v1_chained_approved.jsonl", version: 1,
+		events: 26, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1},
 }
 
 func TestGoldenLogsStillRebuild(t *testing.T) {

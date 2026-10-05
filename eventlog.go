@@ -32,6 +32,7 @@ const (
 type Event struct {
 	V    int       `json:"v,omitempty"` // log format version (FormatVersion); absent = 0, written before versions existed
 	Seq  int       `json:"seq"`
+	Prev string    `json:"prev,omitempty"` // hash of the previous line as written (FileLog's chain); see chain.go
 	Type EventType `json:"type"`
 	Time time.Time `json:"time"`
 
@@ -94,19 +95,24 @@ var ErrCorruptLog = errors.New("agentsafe: log is corrupt")
 // before writing.
 type FileLog struct {
 	Path string
-	next int // next sequence number; 0 = not yet loaded (re-read, and the tail repaired, on next Append)
+	// Key, if set, makes the chain an HMAC-SHA256 chain: without the key, an attacker who rewrites the whole
+	// file can't recompute the links. Use the same key for a log's whole life; keep it off the log's host.
+	Key []byte
+
+	next int    // next sequence number; 0 = not yet loaded (re-read, and the tail repaired, on next Append)
+	prev string // chain link for the next line: hash of the last acknowledged line
 }
 
 // Append writes e as the next line. Seq and Time are set here.
 func (l *FileLog) Append(e Event) error {
 	if l.next == 0 {
-		n, err := l.repair()
+		n, last, err := l.repair()
 		if err != nil {
 			return err
 		}
-		l.next = n + 1
+		l.next, l.prev = n+1, l.link(last)
 	}
-	e.Seq, e.Time = l.next, time.Now().UTC()
+	e.Seq, e.Time, e.Prev = l.next, time.Now().UTC(), l.prev
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -125,60 +131,70 @@ func (l *FileLog) Append(e Event) error {
 		return err
 	}
 	l.next++
+	l.prev = l.hash(line)
 	return f.Close()
 }
 
 // Read returns every acknowledged event in order, ignoring a torn tail. A missing file is an empty log.
 func (l *FileLog) Read() ([]Event, error) {
-	events, _, err := l.load()
+	events, _, _, err := l.load()
 	return events, err
 }
 
 // repair cuts a torn tail off the file, so the next line isn't glued onto half a line, and returns the
 // number of acknowledged events. Only the run's writer (the lock holder) calls it, via Append.
-func (l *FileLog) repair() (int, error) {
-	events, good, err := l.load()
+func (l *FileLog) repair() (int, []byte, error) {
+	events, last, good, err := l.load()
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	info, err := os.Stat(l.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
+		return 0, nil, nil
 	}
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if info.Size() == good {
-		return len(events), nil
+		return len(events), last, nil
 	}
 	f, err := os.OpenFile(l.Path, os.O_WRONLY, 0o600)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if err := f.Truncate(good); err != nil {
 		_ = f.Close()
-		return 0, err
+		return 0, nil, err
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return 0, err
+		return 0, nil, err
 	}
-	return len(events), f.Close()
+	return len(events), last, f.Close()
 }
 
-func (l *FileLog) load() ([]Event, int64, error) {
+// load reads, scans and chain-verifies the file. It returns the acknowledged events, the last acknowledged
+// line (without its newline, for the next chain link), and the byte length they occupy.
+func (l *FileLog) load() ([]Event, []byte, int64, error) {
 	data, err := os.ReadFile(l.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, 0, nil
+		return nil, nil, 0, nil
 	}
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
-	events, good, err := scanLines(data)
+	events, lines, good, err := scanLines(data)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: %w", l.Path, err)
+		return nil, nil, 0, fmt.Errorf("%s: %w", l.Path, err)
 	}
-	return events, good, nil
+	if err := l.verify(events, lines); err != nil {
+		return nil, nil, 0, fmt.Errorf("%s: %w", l.Path, err)
+	}
+	var last []byte
+	if len(lines) > 0 {
+		last = lines[len(lines)-1]
+	}
+	return events, last, good, nil
 }
 
 // scanLines parses a JSON-lines log. It returns the acknowledged events and the byte length they occupy.
@@ -186,8 +202,9 @@ func (l *FileLog) load() ([]Event, int64, error) {
 //	bytes after the last newline       an unfinished write: torn, dropped
 //	a last line that doesn't parse     a torn write (e.g. zero-filled blocks after power loss): dropped
 //	a bad line with good lines after   damaged acknowledged history: ErrCorruptLog
-func scanLines(data []byte) ([]Event, int64, error) {
+func scanLines(data []byte) ([]Event, [][]byte, int64, error) {
 	var events []Event
+	var kept [][]byte
 	var good int64
 	lines := bytes.SplitAfter(data, []byte{'\n'})
 	for i, raw := range lines {
@@ -201,14 +218,15 @@ func scanLines(data []byte) ([]Event, int64, error) {
 		var e Event
 		if err := json.Unmarshal(bytes.TrimSpace(raw), &e); err != nil {
 			if laterData(lines[i+1:]) {
-				return nil, 0, fmt.Errorf("%w: line %d can't be read and later lines exist: %w", ErrCorruptLog, i+1, err)
+				return nil, nil, 0, fmt.Errorf("%w: line %d can't be read and later lines exist: %w", ErrCorruptLog, i+1, err)
 			}
 			break // the last line, unreadable: a torn write
 		}
 		events = append(events, e)
+		kept = append(kept, bytes.TrimRight(raw, "\r\n"))
 		good += int64(len(raw))
 	}
-	return events, good, nil
+	return events, kept, good, nil
 }
 
 func laterData(rest [][]byte) bool {
