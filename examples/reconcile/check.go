@@ -39,29 +39,30 @@ func expectedFromFiles(dir string) ([]agentsafe.Effect, error) {
 	sort.Strings(sorted)
 
 	var out []agentsafe.Effect
-	disc := func(txn, kind string, la, ba *float64) {
+	// Amounts are compared as the source files state them: exact decimals, never through a float.
+	disc := func(txn, kind string, l, b []map[string]string) {
 		out = append(out, agentsafe.Effect{ID: "discrepancy:" + txn + ":" + kind, Kind: "discrepancy",
-			Fields: map[string]any{"ledger_amount": show(la), "bank_amount": show(ba)}})
+			Fields: map[string]any{"ledger_amount": decimalOf(l), "bank_amount": decimalOf(b)}})
 	}
 	for _, txn := range sorted {
 		l, b := L[txn], B[txn]
 		la, ba := amountOf(l), amountOf(b)
 		switch {
 		case len(l) > 0 && len(b) == 0:
-			disc(txn, "missing_in_bank", la, nil)
+			disc(txn, "missing_in_bank", l, nil)
 			out = append(out, agentsafe.Effect{ID: "payment:reissue:" + txn, Kind: "payment", Gated: true,
-				Fields: map[string]any{"payee": l[0]["payee"], "amount_inr": show(la)}})
+				Fields: map[string]any{"payee": l[0]["payee"], "amount_inr": decimalOf(l)}})
 		case len(l) == 0 && len(b) > 0:
-			disc(txn, "missing_in_ledger", nil, ba)
+			disc(txn, "missing_in_ledger", nil, b)
 		}
 		if len(b) > 1 {
-			disc(txn, "duplicate_in_bank", la, ba)
+			disc(txn, "duplicate_in_bank", l, b)
 		}
 		if len(l) > 1 {
-			disc(txn, "duplicate_in_ledger", la, ba)
+			disc(txn, "duplicate_in_ledger", l, b)
 		}
 		if la != nil && ba != nil && *la != *ba {
-			disc(txn, "amount_mismatch", la, ba)
+			disc(txn, "amount_mismatch", l, b)
 		}
 	}
 	return out, nil
@@ -76,16 +77,15 @@ func actualFromRecords(ledger *Ledger, gw *Gateway) ([]agentsafe.Effect, error) 
 	var out []agentsafe.Effect
 	for _, r := range rows {
 		out = append(out, agentsafe.Effect{ID: "discrepancy:" + r.TxnID + ":" + r.Kind, Kind: "discrepancy", Key: r.Key,
-			Fields: map[string]any{"ledger_amount": show(r.LedgerAmount), "bank_amount": show(r.BankAmount)}})
+			Fields: map[string]any{"ledger_amount": r.LedgerAmount, "bank_amount": r.BankAmount}}) // *float64; nil = null
 	}
 	pays, err := gw.Payments()
 	if err != nil {
 		return nil, err
 	}
 	for _, p := range pays {
-		a := p.Amount
 		out = append(out, agentsafe.Effect{ID: "payment:reissue:" + p.Ref, Kind: "payment", Gated: true, Key: p.Key,
-			Fields: map[string]any{"payee": p.Payee, "amount_inr": show(&a)}})
+			Fields: map[string]any{"payee": p.Payee, "amount_inr": p.Amount}})
 	}
 	return out, nil
 }
@@ -122,4 +122,12 @@ func printReconciliation(dataDir string, ledger *Ledger, gw *Gateway, log agents
 	rep, err := reconcile(dataDir, ledger, gw, events, st)
 	must(err)
 	fmt.Print("\n" + rep.String())
+}
+
+// decimalOf is a row set's amount exactly as the file states it, or nil when there is no row.
+func decimalOf(rows []map[string]string) any {
+	if len(rows) == 0 {
+		return nil
+	}
+	return agentsafe.Decimal(rows[0]["amount_inr"])
 }

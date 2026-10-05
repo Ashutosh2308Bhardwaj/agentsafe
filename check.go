@@ -171,8 +171,10 @@ func Reconcile(expected, actual []Effect, events []Event, claims []Claim) Report
 		switch {
 		case c.Claimed == nil && c.Required:
 			add(Warn, "claims", "the agent made no %s claim", c.Name)
-		case c.Claimed != nil && fmt.Sprint(c.Claimed) != fmt.Sprint(c.Actual):
-			add(Warn, "claims", "the agent claimed %s = %v; the records say %v", c.Name, c.Claimed, c.Actual)
+		case c.Claimed != nil:
+			if eq, why := Same(c.Actual, c.Claimed); !eq {
+				add(Warn, "claims", "the agent claimed %s = %v; the records say %v (%s)", c.Name, c.Claimed, c.Actual, why)
+			}
 		}
 	}
 
@@ -206,13 +208,21 @@ func rank(s Severity) int {
 	}
 }
 
+// diffFields compares the expected fields with the actual ones (Same). Only expected fields are compared: a
+// system of record may hold more columns than the check cares about. A field that's absent is "missing",
+// never equal to null.
 func diffFields(want, got map[string]any) string {
 	var diffs []string
 	for k, w := range want {
-		if fmt.Sprint(w) != fmt.Sprint(got[k]) {
-			diffs = append(diffs, fmt.Sprintf("%s=%v (should be %v)", k, got[k], w))
+		g, ok := got[k]
+		if !ok {
+			diffs = append(diffs, fmt.Sprintf("%s is missing (should be %v)", k, norm(w).show))
+			continue
+		}
+		if eq, why := Same(w, g); !eq {
+			diffs = append(diffs, k+": "+why)
 		}
 	}
 	sort.Strings(diffs)
-	return strings.Join(diffs, ", ")
+	return strings.Join(diffs, "; ")
 }
