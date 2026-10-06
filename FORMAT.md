@@ -13,6 +13,7 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 | 1 | step 2.4 | adds optional `prev` (hash chain, see `chain.go`). No version bump: rule 2 below. A log may start unchained (older lines) and become chained; once chained, a missing link is tampering. **Consequence:** don't let a library older than this append to a chained log; its unlinked lines would read as tampering. |
 | 2 | step 2.5 | adds the `approval_denied` event (an Authorizer refused a decision: `by`, `decision`, `key`, and `reason` = why it was refused) and `run_started.by` (who started the run, for maker-checker). Bumped, not rule 2: a v1 library would reject `approval_denied` as an unknown type, and must not skip it, since it's an audit fact. v1 events read unchanged. |
 | 3 | step 2.6 | adds `sealed`: the content fields (`system`, `task`, `message`, `args`, `result`, `summary`, `text`, `reason`) encrypted by a `Codec` (`seal.go`), with those fields empty. Bumped, not rule 2: a v2 library would read a sealed event as one with empty content, a different history. A sealed event read without its Codec is refused (`ErrSealed`). |
+| 3 | step 4.3 | adds optional `message.native`: a provider's own form of an assistant message (Claude: the response's content blocks, thinking included), replayed verbatim so a resumed run sends exactly what it sent before. No version bump: rule 2 (an older library ignores it; a run resumed without it on Claude fails loudly with a 400, never silently). |
 
 ## Reading
 

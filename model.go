@@ -26,6 +26,12 @@ type Message struct {
 	Content    *string    `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+
+	// Native is the provider's own form of an assistant message, kept so the adapter that produced it can send
+	// it back byte for byte (e.g. Claude's thinking blocks, which are bound to the exact conversation before
+	// them: a resumed run that rebuilt them differently would be rejected). Other adapters ignore it. It is
+	// logged, and sealed with the rest of the message.
+	Native json.RawMessage `json:"native,omitempty"`
 }
 
 // ToolCall is a tool invocation the model PROPOSED. Nothing has run yet: the runner decides.

@@ -58,7 +58,12 @@ func (m *OpenAICompatible) Describe() (string, string) {
 
 // Decide implements Model.
 func (m *OpenAICompatible) Decide(ctx context.Context, messages []Message, tools []ToolSpec) (Decision, error) {
-	req := chatRequest{Model: m.Model, Messages: messages}
+	wire := make([]Message, len(messages))
+	for i, msg := range messages {
+		msg.Native = nil // another provider's form: not part of the OpenAI wire format
+		wire[i] = msg
+	}
+	req := chatRequest{Model: m.Model, Messages: wire}
 	for _, t := range tools {
 		req.Tools = append(req.Tools, chatTool{Type: "function", Function: t})
 	}
