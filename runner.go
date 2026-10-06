@@ -58,7 +58,7 @@ func (r *Runner) Start(ctx context.Context, system, task string) (State, error) 
 		return State{}, err
 	}
 	if len(events) > 0 {
-		return State{}, fmt.Errorf("log already has %d events; use Continue", len(events))
+		return State{}, fmt.Errorf("%w (%d events)", ErrRunExists, len(events))
 	}
 	max := r.MaxSteps
 	if max == 0 {
@@ -117,7 +117,7 @@ func (r *Runner) rebuild(ctx context.Context) (State, error) {
 		return st, err
 	}
 	if st.Status == StatusNew {
-		return st, fmt.Errorf("empty log; use Start")
+		return st, ErrNoRun
 	}
 	return st, nil
 }
@@ -171,7 +171,7 @@ func (r *Runner) loop(ctx context.Context, st State) (State, error) {
 			}
 
 		default:
-			return st, fmt.Errorf("unexpected status %s", st.Status)
+			return st, fmt.Errorf("%w: unexpected status %s", ErrInvalidTransition, st.Status)
 		}
 	}
 }

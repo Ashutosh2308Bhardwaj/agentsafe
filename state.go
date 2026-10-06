@@ -103,6 +103,13 @@ func (s *State) Apply(e Event) error {
 	if e.Sealed != "" {
 		return fmt.Errorf("%w (event %d)", ErrSealed, e.Seq)
 	}
+	if err := s.apply(e); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidTransition, err)
+	}
+	return nil
+}
+
+func (s *State) apply(e Event) error {
 	switch e.Type {
 	case EvRunStarted:
 		if s.Status != StatusNew {

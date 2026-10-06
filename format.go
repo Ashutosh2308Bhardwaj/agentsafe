@@ -50,7 +50,7 @@ func Upgrade(e Event) (Event, error) {
 	for e.V < FormatVersion {
 		up, ok := upgrades[e.V]
 		if !ok {
-			return e, fmt.Errorf("agentsafe: no upgrade from log format v%d (event %d)", e.V, e.Seq)
+			return e, fmt.Errorf("%w: no upgrade from log format v%d (event %d)", ErrCorruptLog, e.V, e.Seq)
 		}
 		from := e.V
 		var err error

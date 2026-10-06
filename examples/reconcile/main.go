@@ -82,24 +82,24 @@ func main() {
 		write = plainTool{write}
 	}
 	who := identity()
-	r := &agentsafe.Runner{
-		Model:    model,
-		Tools:    []agentsafe.Tool{&ReadCSV{Dir: filepath.Join(here, "data")}, &CompareRows{Dir: filepath.Join(here, "data")}, write, &SendPayout{Dir: filepath.Join(here, "data"), Gateway: gw}},
-		Log:      &agentsafe.FileLog{Path: filepath.Join(out, *runID+"-log.jsonl"), Codec: logCodec()}, // AGENTSAFE_LOG_KEY: sealed at rest
-		MaxSteps: *maxSteps,
-		Scope:    batch(filepath.Join(here, "data")), // same input files = same operations, across runs
-		Logf:     logf,
-		Redact:   agentsafe.RedactFields("payee"), // payee names never reach the console
-		Hook:     killHookFn,                      // KILL_AT=<point> KILL_NTH=<k>: SIGKILL the k-th time the point is reached
+	data := filepath.Join(here, "data")
+	r, err := agentsafe.New(model,
+		&agentsafe.FileLog{Path: filepath.Join(out, *runID+"-log.jsonl"), Codec: logCodec()}, // AGENTSAFE_LOG_KEY: sealed at rest
+		agentsafe.WithTools(&ReadCSV{Dir: data}, &CompareRows{Dir: data}, write, &SendPayout{Dir: data, Gateway: gw}),
+		agentsafe.WithMaxSteps(*maxSteps),
+		agentsafe.WithScope(batch(data)), // same input files = same operations, across runs
+		agentsafe.WithLogf(logf),
+		agentsafe.WithRedactor(agentsafe.RedactFields("payee")), // payee names never reach the console
+		agentsafe.WithHook(killHookFn),                          // KILL_AT=<point> KILL_NTH=<k>: SIGKILL the k-th time the point is reached
 		// Who decides, and who may. The identity comes from the OS account (uid), not $USER, which anyone can
 		// set; the policy comes from separate config. Never derive both from the same input: if the allowlist
 		// were "cli:"+$USER, then USER=anyone would pass by definition. In production, identity comes from your
 		// SSO/API auth and the policy from config the approver can't edit.
-		StartedBy:  "scheduler", // runs are started by the system; a human approves (maker-checker)
-		Authorizer: agentsafe.All(agentsafe.AllowList(approvers(who)...), agentsafe.NotRequester()),
-	}
+		agentsafe.WithStartedBy("scheduler"), // runs are started by the system; a human approves (maker-checker)
+		agentsafe.WithAuthorizer(agentsafe.All(agentsafe.AllowList(approvers(who)...), agentsafe.NotRequester())),
+	)
+	must(err)
 	var st agentsafe.State
-	var err error
 	if *checkOnly {
 		events, err := r.Log.Read(context.Background())
 		must(err)

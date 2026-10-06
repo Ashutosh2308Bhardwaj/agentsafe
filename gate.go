@@ -48,10 +48,10 @@ func (r *Runner) decide(ctx context.Context, key, decision, by, reason string) (
 		r.logf("[%s already %s: nothing to do]", key, decision)
 		return r.loop(ctx, st) // idempotent: the same decision twice changes nothing
 	} else if prev != "" && prev != "requested" {
-		return st, fmt.Errorf("%s was already %s; a decision can't be reversed by re-deciding", key, prev)
+		return st, fmt.Errorf("%w: %s was already %s", ErrAlreadyDecided, key, prev)
 	}
 	if st.Status != StatusAwaitingApproval || st.Waiting == nil || st.Waiting.Key != key {
-		return st, fmt.Errorf("run is not waiting for approval of %s (status %s)", key, st.Status)
+		return st, fmt.Errorf("%w: %s (status %s)", ErrNotWaiting, key, st.Status)
 	}
 	if err := r.authorize(ctx, &st, decision, by, reason); err != nil {
 		return st, err
@@ -88,7 +88,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 		return false, r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
 	}
 	if key == "" {
-		return false, fmt.Errorf("gated tool %s must be an IdempotentTool: approvals are addressed by operation key", c.Function.Name)
+		return false, fmt.Errorf("%w: gated tool %s must be an IdempotentTool: approvals are addressed by operation key", ErrConfig, c.Function.Name)
 	}
 	sum, err := g.Summary(args)
 	if err != nil {
