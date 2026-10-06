@@ -37,6 +37,36 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  # Storage backends are separate modules (the core stays dependency-free) with their own minimum Go: their
+  # drivers'. Each runs the storetest conformance suite.
+  backends:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: [oldstable, stable]
+    runs-on: ${{ matrix.os }}
+    defaults: { run: { working-directory: sqlite } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ matrix.go }}", cache-dependency-path: sqlite/go.sum }
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+  backends-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: stable, cache-dependency-path: sqlite/go.sum }
+      - uses: golangci/golangci-lint-action@v8
+        with: { version: latest, working-directory: sqlite, args: --config ../.golangci.yml }
+      - name: staticcheck
+        working-directory: sqlite
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - name: govulncheck
+        working-directory: sqlite
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
   crash-harness:
     runs-on: ubuntu-latest
     steps:

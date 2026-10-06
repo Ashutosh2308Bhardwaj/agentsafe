@@ -21,4 +21,14 @@ step "tests (race)";   go test -race -count=1 ./...
 step coverage;         go test -coverprofile=coverage.out . >/dev/null && go tool cover -func=coverage.out | tail -1
 step "crash harness";  scripts/money_sweep.sh >/dev/null
 step "crash harness (sealed log)"; AGENTSAFE_LOG_KEY=4242424242424242424242424242424242424242424242424242424242424242 scripts/money_sweep.sh >/dev/null
+# Backend modules: their own go.mod and minimum Go (the go command fetches that toolchain if needed).
+for m in sqlite; do
+  step "backend $m: vet, lint, staticcheck, govulncheck, tests (race)"
+  # Built and linted with the module's own toolchain (GOTOOLCHAIN=auto reads go.mod); scanned for
+  # vulnerabilities against the latest release, like the core.
+  (cd "$m" && export GOTOOLCHAIN=auto && go vet ./... && golangci-lint run --config ../.golangci.yml ./... \
+    && go run honnef.co/go/tools/cmd/staticcheck@latest ./... \
+    && GOTOOLCHAIN="${latest:-auto}" go run golang.org/x/vuln/cmd/govulncheck@latest ./... >/dev/null \
+    && go test -race -count=1 ./...)
+done
 printf '\nall gates green\n'
