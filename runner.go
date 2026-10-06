@@ -48,12 +48,12 @@ type Runner struct {
 
 // Start begins a new run. It refuses a log that already has events.
 func (r *Runner) Start(ctx context.Context, system, task string) (State, error) {
-	release, err := r.lock()
+	release, err := r.lock(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	defer release()
-	events, err := r.Log.Read()
+	events, err := r.Log.Read(ctx)
 	if err != nil {
 		return State{}, err
 	}
@@ -69,7 +69,7 @@ func (r *Runner) Start(ctx context.Context, system, task string) (State, error) 
 	if d, ok := r.Model.(Describer); ok {
 		start.Provider, start.Model = d.Describe()
 	}
-	if err := r.emit(&st, start); err != nil {
+	if err := r.emit(ctx, &st, start); err != nil {
 		return st, err
 	}
 	return r.loop(ctx, st)
@@ -78,16 +78,16 @@ func (r *Runner) Start(ctx context.Context, system, task string) (State, error) 
 // Extend gives a PAUSED run more model decisions and continues it. The decision is logged with who made it:
 // budget is never raised silently (week 3 S1 review, Q3).
 func (r *Runner) Extend(ctx context.Context, extraSteps int, by string) (State, error) {
-	release, err := r.lock()
+	release, err := r.lock(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	defer release()
-	st, err := r.rebuild()
+	st, err := r.rebuild(ctx)
 	if err != nil {
 		return st, err
 	}
-	if err := r.emit(&st, Event{Type: EvBudgetExtended, ExtraSteps: extraSteps, By: by}); err != nil {
+	if err := r.emit(ctx, &st, Event{Type: EvBudgetExtended, ExtraSteps: extraSteps, By: by}); err != nil {
 		return st, err
 	}
 	return r.loop(ctx, st)
@@ -95,20 +95,20 @@ func (r *Runner) Extend(ctx context.Context, extraSteps int, by string) (State, 
 
 // Continue rebuilds the run from its log and drives it until it finishes, pauses, or errors.
 func (r *Runner) Continue(ctx context.Context) (State, error) {
-	release, err := r.lock()
+	release, err := r.lock(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	defer release()
-	st, err := r.rebuild()
+	st, err := r.rebuild(ctx)
 	if err != nil {
 		return st, err
 	}
 	return r.loop(ctx, st)
 }
 
-func (r *Runner) rebuild() (State, error) {
-	events, err := r.Log.Read()
+func (r *Runner) rebuild(ctx context.Context) (State, error) {
+	events, err := r.Log.Read(ctx)
 	if err != nil {
 		return State{}, err
 	}
@@ -134,7 +134,7 @@ func (r *Runner) loop(ctx context.Context, st State) (State, error) {
 			return st, nil
 
 		case StatusAnswered:
-			if err := r.emit(&st, Event{Type: EvRunFinished, Stop: st.Stop, Text: st.Text}); err != nil {
+			if err := r.emit(ctx, &st, Event{Type: EvRunFinished, Stop: st.Stop, Text: st.Text}); err != nil {
 				return st, err
 			}
 
@@ -142,7 +142,7 @@ func (r *Runner) loop(ctx context.Context, st State) (State, error) {
 			if st.Step >= st.Budget {
 				// Out of budget: PAUSE, don't finish (week 1 F12, week 3 W3-1). The log already holds everything
 				// needed to continue; whether to continue is a separate, logged decision (Extend).
-				if err := r.emit(&st, Event{Type: EvRunPaused, Reason: "budget_exhausted"}); err != nil {
+				if err := r.emit(ctx, &st, Event{Type: EvRunPaused, Reason: "budget_exhausted"}); err != nil {
 					return st, err
 				}
 				r.logf("[paused: budget of %d steps exhausted; Extend to continue]", st.Budget)
@@ -155,7 +155,7 @@ func (r *Runner) loop(ctx context.Context, st State) (State, error) {
 			r.hook("after_model_call")
 			msg := d.Message
 			msg.Role = RoleAssistant
-			if err := r.emit(&st, Event{Type: EvModelDecided, Step: st.Step + 1, Message: &msg,
+			if err := r.emit(ctx, &st, Event{Type: EvModelDecided, Step: st.Step + 1, Message: &msg,
 				FinishReason: d.FinishReason, Usage: &d.Usage}); err != nil {
 				return st, err
 			}
@@ -195,10 +195,10 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 			if prev.PayloadHash != ph {
 				result, how = conflict(key), "CONFLICT"
 			}
-			if err := r.emit(st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
+			if err := r.emit(ctx, st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
 				return err
 			}
-			if err := r.emit(st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph, Replayed: true}); err != nil {
+			if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph, Replayed: true}); err != nil {
 				return err
 			}
 			r.logf("    %s(%.60s) -> %s from the log: %.80s", c.Function.Name, r.show(c.Function.Arguments), how, r.show(result))
@@ -216,7 +216,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 		// goes back into the tool, which returns the original outcome instead of acting twice.
 		r.logf("    ↻ %s (%s) was started before a crash and may have executed; retrying with the same key", c.Function.Name, c.ID)
 	}
-	if err := r.emit(st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
+	if err := r.emit(ctx, st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
 		return err
 	}
 	r.hook("before_tool_executed")
@@ -227,7 +227,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 		r.logf("    ? %s left in doubt: %s", c.Function.Name, r.show(err.Error()))
 		return err
 	}
-	if err := r.emit(st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph}); err != nil {
+	if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph}); err != nil {
 		return err
 	}
 	r.logf("    %s(%.70s) -> %.90s", c.Function.Name, r.show(c.Function.Arguments), r.show(result))
@@ -253,7 +253,7 @@ func (r *Runner) find(name string) Tool {
 
 // emit validates the event against the state machine, THEN persists it, THEN applies it. An event the
 // state machine rejects is never written; an event that fails to write never changes the state.
-func (r *Runner) emit(st *State, e Event) error {
+func (r *Runner) emit(ctx context.Context, st *State, e Event) error {
 	e.V = FormatVersion
 	check := *st
 	check.Started = copyMap(st.Started)
@@ -271,7 +271,7 @@ func (r *Runner) emit(st *State, e Event) error {
 	if err := check.Apply(e); err != nil {
 		return fmt.Errorf("refusing to log invalid event: %w", err)
 	}
-	if err := r.Log.Append(e); err != nil {
+	if err := r.Log.Append(ctx, e); err != nil {
 		return fmt.Errorf("log append: %w", err)
 	}
 	*st = check

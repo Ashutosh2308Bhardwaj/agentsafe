@@ -124,8 +124,8 @@ func (r *Run) AppendLine(ctx context.Context, seq int, line []byte) error {
 // background until unlock. If this process dies, renewal stops and the lease expires after LeaseTTL. A lease
 // can also be lost while held (this process paused longer than the TTL): another runner may then take the
 // run, and this one is stopped by the conditional append (ErrConflict) at its next write.
-func (r *Run) Lock() (func() error, error) {
-	l, err := r.acquire(context.Background())
+func (r *Run) Lock(ctx context.Context) (func() error, error) {
+	l, err := r.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}

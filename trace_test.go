@@ -12,7 +12,7 @@ func TestTraceIsAPureFunctionOfTheLog(t *testing.T) {
 	if _, err := r.Start(context.Background(), "sys", "task"); err != nil {
 		t.Fatal(err)
 	}
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	a, err := BuildTrace(events, "test")
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestTraceShowsACrashMidCall(t *testing.T) {
 	if _, err := r.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	tr, err := BuildTrace(events, "test")
 	if err != nil {
 		t.Fatal(err)

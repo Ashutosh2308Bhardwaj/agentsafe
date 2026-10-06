@@ -99,7 +99,7 @@ func chargeRun(t *testing.T, tools ...Tool) *Runner {
 
 func results(t *testing.T, r *Runner) []string {
 	t.Helper()
-	events, err := r.Log.Read()
+	events, err := r.Log.Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

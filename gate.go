@@ -35,12 +35,12 @@ func (r *Runner) Reject(ctx context.Context, key, by, reason string) (State, err
 }
 
 func (r *Runner) decide(ctx context.Context, key, decision, by, reason string) (State, error) {
-	release, err := r.lock()
+	release, err := r.lock(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	defer release()
-	st, err := r.rebuild()
+	st, err := r.rebuild(ctx)
 	if err != nil {
 		return st, err
 	}
@@ -56,7 +56,7 @@ func (r *Runner) decide(ctx context.Context, key, decision, by, reason string) (
 	if err := r.authorize(ctx, &st, decision, by, reason); err != nil {
 		return st, err
 	}
-	if err := r.emit(&st, Event{Type: EvApprovalDecided, CallID: st.Waiting.CallID, Key: key,
+	if err := r.emit(ctx, &st, Event{Type: EvApprovalDecided, CallID: st.Waiting.CallID, Key: key,
 		Decision: decision, By: by, Reason: reason}); err != nil {
 		return st, err
 	}
@@ -73,7 +73,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 		if verr := v.Validate(ctx, args); verr != nil {
 			res := errorJSON(fmt.Errorf("refused before execution: %w", verr))
 			r.logf("    ✗ %s(%.60s) refused: %s", c.Function.Name, r.show(c.Function.Arguments), r.show(verr.Error()))
-			return false, r.emit(st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
+			return false, r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
 		}
 	}
 	g, gated := tool.(Gated)
@@ -85,7 +85,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 		return true, nil
 	case "rejected":
 		res := errorJSON(fmt.Errorf("rejected by a human approver; nothing was done"))
-		return false, r.emit(st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
+		return false, r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
 	}
 	if key == "" {
 		return false, fmt.Errorf("gated tool %s must be an IdempotentTool: approvals are addressed by operation key", c.Function.Name)
@@ -95,7 +95,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 		return false, err
 	}
 	b, _ := json.Marshal(sum)
-	if err := r.emit(st, Event{Type: EvApprovalRequested, CallID: c.ID, Tool: c.Function.Name, Key: key, Summary: string(b)}); err != nil {
+	if err := r.emit(ctx, st, Event{Type: EvApprovalRequested, CallID: c.ID, Tool: c.Function.Name, Key: key, Summary: string(b)}); err != nil {
 		return false, err
 	}
 	r.logf("[awaiting approval] %s %s\n    key=%s  →  Approve or Reject by key", c.Function.Name, r.show(string(b)), key)

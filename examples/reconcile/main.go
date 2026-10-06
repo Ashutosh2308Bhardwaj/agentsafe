@@ -101,7 +101,7 @@ func main() {
 	var st agentsafe.State
 	var err error
 	if *checkOnly {
-		events, err := r.Log.Read()
+		events, err := r.Log.Read(context.Background())
 		must(err)
 		st, err = agentsafe.Rebuild(events)
 		must(err)

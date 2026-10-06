@@ -34,7 +34,7 @@ func (s *fileStore) ReadLines(context.Context) ([][]byte, error) {
 	return lines, err
 }
 
-func (s *fileStore) AppendLine(_ context.Context, seq int, line []byte) error {
+func (s *fileStore) AppendLine(ctx context.Context, seq int, line []byte) error {
 	if bytes.ContainsAny(line, "\r\n") {
 		return errors.New("agentsafe: a log line can't contain a line break")
 	}
@@ -43,6 +43,9 @@ func (s *fileStore) AppendLine(_ context.Context, seq int, line []byte) error {
 		return err
 	}
 	defer release()
+	if err := ctx.Err(); err != nil { // checked after waiting for the lock: the caller may have given up meanwhile
+		return err
+	}
 
 	info, err := os.Stat(s.path)
 	switch {
@@ -145,7 +148,7 @@ func (s *fileStore) scan() ([][]byte, int64, error) {
 // Lock takes an exclusive OS-level lock on "<path>.lock" (flock on Unix, LockFileEx on Windows). The OS
 // releases it when the holding process exits, however it exits, so no expiry is needed. It works across
 // processes on one machine; runs shared between machines need a database-backed store.
-func (s *fileStore) Lock() (func() error, error) {
+func (s *fileStore) Lock(context.Context) (func() error, error) {
 	f, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err

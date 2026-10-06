@@ -104,7 +104,7 @@ func TestRejectionRefusesTheCallAndNothingRuns(t *testing.T) {
 	if tool.paid != 0 || st.Status != StatusFinished {
 		t.Fatalf("rejected payout must not run: paid=%d status=%s", tool.paid, st.Status)
 	}
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	var refused bool
 	for _, e := range events {
 		refused = refused || (e.Type == EvToolRefused && strings.Contains(e.Result, "rejected"))
@@ -121,7 +121,7 @@ func TestInvalidCallNeverReachesTheApprover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	for _, e := range events {
 		if e.Type == EvApprovalRequested {
 			t.Fatal("an invalid call must be refused before approval is requested")

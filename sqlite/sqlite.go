@@ -147,8 +147,8 @@ func (r *Run) AppendLine(ctx context.Context, seq int, line []byte) error {
 // background until unlock. If this process dies, renewal stops and the lease expires after LeaseTTL. A lease
 // can also be lost while held (this process paused longer than the TTL): another runner may then take the
 // run, and this one is stopped by the conditional append (ErrConflict) at its next write.
-func (r *Run) Lock() (func() error, error) {
-	l, err := r.acquire()
+func (r *Run) Lock(ctx context.Context) (func() error, error) {
+	l, err := r.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -170,14 +170,14 @@ func (r *Run) ttl() time.Duration {
 	return DefaultLeaseTTL
 }
 
-func (r *Run) acquire() (*lease, error) {
+func (r *Run) acquire(ctx context.Context) (*lease, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}
 	l := &lease{r: r, holder: hex.EncodeToString(b), stop: make(chan struct{})}
 	now := time.Now()
-	res, err := r.d.db.Exec(`
+	res, err := r.d.db.ExecContext(ctx, `
 		INSERT INTO agentsafe_leases (run_id, holder, expires_at) VALUES (?1, ?2, ?3)
 		ON CONFLICT (run_id) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
 		WHERE agentsafe_leases.expires_at <= ?4`,

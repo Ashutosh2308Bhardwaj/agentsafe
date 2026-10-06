@@ -80,8 +80,8 @@ type Event struct {
 // Log is an append-only record of a run. It is the source of truth: state is derived from it (Rebuild),
 // never kept only in memory (week 2 W2-5).
 type Log interface {
-	Append(e Event) error
-	Read() ([]Event, error)
+	Append(ctx context.Context, e Event) error
+	Read(ctx context.Context) ([]Event, error)
 }
 
 // ErrCorruptLog is returned when acknowledged history is damaged: a line that can't be read with valid
@@ -113,12 +113,12 @@ func (l *FileLog) journal() *Journal {
 }
 
 // Append writes e as the next line. Seq, Time and Prev are set here.
-func (l *FileLog) Append(e Event) error { return l.journal().Append(e) }
+func (l *FileLog) Append(ctx context.Context, e Event) error { return l.journal().Append(ctx, e) }
 
 // Read returns every acknowledged event in order, ignoring a torn tail. A missing file is an empty log.
 // Sealed events are opened with the Codec; without it, a sealed log is refused (ErrSealed).
-func (l *FileLog) Read() ([]Event, error) {
-	events, err := l.journal().Read()
+func (l *FileLog) Read(ctx context.Context) ([]Event, error) {
+	events, err := l.journal().Read(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", l.Path, err)
 	}
@@ -127,11 +127,11 @@ func (l *FileLog) Read() ([]Event, error) {
 
 // Head returns the hash of the last acknowledged line: anchor it outside the log to make an edit of the
 // last event, or a truncation, detectable. An empty log's head is "genesis".
-func (l *FileLog) Head() (string, error) { return l.journal().Head() }
+func (l *FileLog) Head(ctx context.Context) (string, error) { return l.journal().Head(ctx) }
 
 // Lock takes the run's lease: an exclusive OS lock on "<Path>.lock", released by the OS when the holder
 // exits, however it exits (filestore.go).
-func (l *FileLog) Lock() (func() error, error) { return l.journal().Lock() }
+func (l *FileLog) Lock(ctx context.Context) (func() error, error) { return l.journal().Lock(ctx) }
 
 // load reads and verifies the file; events are returned still sealed.
 func (l *FileLog) load() ([]Event, error) {

@@ -35,7 +35,7 @@ func TestPausedRunnerThatLostTheRunCannotAct(t *testing.T) {
 	if n := export.calls.Load(); n != 1 {
 		t.Fatalf("the tool must run once (by the new owner), ran %d times", n)
 	}
-	events, err := (&FileLog{Path: path}).Read()
+	events, err := (&FileLog{Path: path}).Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,5 +46,5 @@ func TestPausedRunnerThatLostTheRunCannotAct(t *testing.T) {
 
 type noLease struct{ l *FileLog }
 
-func (n noLease) Append(e Event) error   { return n.l.Append(e) }
-func (n noLease) Read() ([]Event, error) { return n.l.Read() }
+func (n noLease) Append(ctx context.Context, e Event) error { return n.l.Append(ctx, e) }
+func (n noLease) Read(ctx context.Context) ([]Event, error) { return n.l.Read(ctx) }

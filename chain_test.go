@@ -49,7 +49,7 @@ func chainedRun(t *testing.T) string {
 
 func TestEveryLineLinksToTheOneBefore(t *testing.T) {
 	path := chainedRun(t)
-	events, err := (&FileLog{Path: path}).Read()
+	events, err := (&FileLog{Path: path}).Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestEveryLineLinksToTheOneBefore(t *testing.T) {
 			t.Fatalf("event %d: prev %q, want %q", e.Seq, e.Prev, want)
 		}
 	}
-	head, _ := (&FileLog{Path: path}).Head()
+	head, _ := (&FileLog{Path: path}).Head(context.Background())
 	h := sha256.Sum256(lineContent(ls[len(ls)-1]))
 	if head != hex.EncodeToString(h[:]) {
 		t.Fatal("Head must be the hash of the last line")
@@ -102,7 +102,7 @@ func TestTamperingIsDetected(t *testing.T) {
 			if after, _ := os.ReadFile(path); bytes.Equal(before, after) {
 				t.Fatal("test bug: the attack didn't change the file")
 			}
-			if _, err := (&FileLog{Path: path}).Read(); !errors.Is(err, ErrTampered) {
+			if _, err := (&FileLog{Path: path}).Read(context.Background()); !errors.Is(err, ErrTampered) {
 				t.Fatalf("want ErrTampered, got %v", err)
 			}
 		})
@@ -149,16 +149,16 @@ func TestWithoutAKeyAForgedTailNeedsAnAnchoredHead(t *testing.T) {
 	// catch the LAST line; comparing against a head anchored elsewhere does.
 	r, _, st := pausedForApproval(t, nil)
 	path := r.Log.(*FileLog).Path
-	anchored, err := (&FileLog{Path: path}).Head() // e.g. stored with the approval request in your database
+	anchored, err := (&FileLog{Path: path}).Head(context.Background()) // e.g. stored with the approval request in your database
 	if err != nil {
 		t.Fatal(err)
 	}
 	forgeApproval(t, path, st)
-	events, err := (&FileLog{Path: path}).Read()
+	events, err := (&FileLog{Path: path}).Read(context.Background())
 	if err != nil || events[len(events)-1].Type != EvApprovalDecided {
 		t.Fatalf("expected the limitation to show (the forged tail reads as a valid approval without a key), got %v", err)
 	}
-	if now, _ := (&FileLog{Path: path}).Head(); now == anchored {
+	if now, _ := (&FileLog{Path: path}).Head(context.Background()); now == anchored {
 		t.Fatal("the head moved, so comparing with the anchored head must reveal the forged line")
 	}
 }
@@ -171,10 +171,10 @@ func TestLegacyUnchainedLogContinuesTheChain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.jsonl")
 	_ = os.WriteFile(path, data, 0o600)
 	l := &FileLog{Path: path}
-	if err := l.Append(Event{Type: EvRunFinished, Stop: "audit-note"}); err != nil {
+	if err := l.Append(context.Background(), Event{Type: EvRunFinished, Stop: "audit-note"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := (&FileLog{Path: path}).Read()
+	events, err := (&FileLog{Path: path}).Read(context.Background())
 	if err != nil {
 		t.Fatalf("an unchained prefix followed by a chained line must read: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestLegacyUnchainedLogContinuesTheChain(t *testing.T) {
 
 func TestReadingAKeyedLogWithoutTheKeyFails(t *testing.T) {
 	r, _, _ := pausedForApproval(t, []byte("k1"))
-	_, err := (&FileLog{Path: r.Log.(*FileLog).Path}).Read()
+	_, err := (&FileLog{Path: r.Log.(*FileLog).Path}).Read(context.Background())
 	if !errors.Is(err, ErrTampered) || !strings.Contains(err.Error(), "link") {
 		t.Fatalf("a keyed log read with no or the wrong key can't be verified, got %v", err)
 	}
@@ -200,13 +200,13 @@ func TestConvertedLineEndingsStillVerify(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	_ = os.WriteFile(path, bytes.ReplaceAll(data, []byte("\n"), []byte("\r\n")), 0o600)
 	l := &FileLog{Path: path}
-	if _, err := l.Read(); err != nil {
+	if _, err := l.Read(context.Background()); err != nil {
 		t.Fatalf("CRLF line endings must not read as tampering: %v", err)
 	}
-	if err := l.Append(Event{Type: EvRunFinished, Stop: "after-crlf"}); err != nil {
+	if err := l.Append(context.Background(), Event{Type: EvRunFinished, Stop: "after-crlf"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&FileLog{Path: path}).Read(); err != nil {
+	if _, err := (&FileLog{Path: path}).Read(context.Background()); err != nil {
 		t.Fatalf("a line appended after CRLF conversion must link correctly: %v", err)
 	}
 }

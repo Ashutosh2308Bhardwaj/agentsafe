@@ -37,7 +37,7 @@ func TestTornAtEveryByte(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := bytes.Count(prefix, []byte{'\n'}) // only newline-terminated lines were acknowledged
-		events, err := (&FileLog{Path: path}).Read()
+		events, err := (&FileLog{Path: path}).Read(context.Background())
 		if err != nil {
 			t.Fatalf("cut at byte %d: a torn tail must not make the log unreadable: %v", cut, err)
 		}
@@ -49,7 +49,7 @@ func TestTornAtEveryByte(t *testing.T) {
 		}
 
 		writer := &FileLog{Path: path}
-		if err := writer.Append(Event{Type: EvRunFinished, Stop: "marker"}); err != nil {
+		if err := writer.Append(context.Background(), Event{Type: EvRunFinished, Stop: "marker"}); err != nil {
 			t.Fatalf("cut at byte %d: append after a torn tail: %v", cut, err)
 		}
 		after, err := os.ReadFile(path)
@@ -59,7 +59,7 @@ func TestTornAtEveryByte(t *testing.T) {
 		if !bytes.HasPrefix(after, data[:goodPrefix(prefix)]) {
 			t.Fatalf("cut at byte %d: repair must keep every acknowledged byte", cut)
 		}
-		again, err := (&FileLog{Path: path}).Read()
+		again, err := (&FileLog{Path: path}).Read(context.Background())
 		if err != nil || len(again) != want+1 || again[want].Seq != want+1 || again[want].Stop != "marker" {
 			t.Fatalf("cut at byte %d: the new event must follow the acknowledged ones cleanly: %v %d", cut, err, len(again))
 		}
@@ -76,7 +76,7 @@ func TestZeroFilledTailIsTorn(t *testing.T) {
 	data := append(fullRunLog(t), []byte("\x00\x00\x00\x00\n")...)
 	path := filepath.Join(t.TempDir(), "z.jsonl")
 	_ = os.WriteFile(path, data, 0o600)
-	events, err := (&FileLog{Path: path}).Read()
+	events, err := (&FileLog{Path: path}).Read(context.Background())
 	if err != nil || len(events) != bytes.Count(data, []byte{'\n'})-1 {
 		t.Fatalf("a zero-filled last line is a torn write: %v %d", err, len(events))
 	}
@@ -89,11 +89,11 @@ func TestDamageInTheMiddleIsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mid.jsonl")
 	_ = os.WriteFile(path, bytes.Join(lines, nil), 0o600)
 
-	if _, err := (&FileLog{Path: path}).Read(); !errors.Is(err, ErrCorruptLog) {
+	if _, err := (&FileLog{Path: path}).Read(context.Background()); !errors.Is(err, ErrCorruptLog) {
 		t.Fatalf("damage before valid lines must be refused, got %v", err)
 	}
 	before, _ := os.ReadFile(path)
-	if err := (&FileLog{Path: path}).Append(Event{Type: EvRunFinished}); !errors.Is(err, ErrCorruptLog) {
+	if err := (&FileLog{Path: path}).Append(context.Background(), Event{Type: EvRunFinished}); !errors.Is(err, ErrCorruptLog) {
 		t.Fatalf("a writer must not append to (or truncate) a corrupt log, got %v", err)
 	}
 	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {

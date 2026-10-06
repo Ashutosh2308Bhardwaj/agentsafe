@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -117,7 +118,7 @@ func reconcile(dataDir string, ledger *Ledger, gw *Gateway, events []agentsafe.E
 }
 
 func printReconciliation(dataDir string, ledger *Ledger, gw *Gateway, log agentsafe.Log, st agentsafe.State) {
-	events, err := log.Read()
+	events, err := log.Read(context.Background())
 	must(err)
 	rep, err := reconcile(dataDir, ledger, gw, events, st)
 	must(err)

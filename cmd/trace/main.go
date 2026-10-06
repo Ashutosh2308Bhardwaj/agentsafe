@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -25,7 +26,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: trace [-otlp out.json] <log.jsonl>")
 		os.Exit(2)
 	}
-	events, err := (&agentsafe.FileLog{Path: flag.Arg(0), Codec: logCodec()}).Read() // AGENTSAFE_LOG_KEY for sealed logs
+	events, err := (&agentsafe.FileLog{Path: flag.Arg(0), Codec: logCodec()}).Read(context.Background()) // AGENTSAFE_LOG_KEY for sealed logs
 	check(err)
 	t, err := agentsafe.BuildTrace(events, *agent)
 	check(err)

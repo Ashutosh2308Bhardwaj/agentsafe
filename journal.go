@@ -51,8 +51,7 @@ type Journal struct {
 }
 
 // Append writes e as the next event. Seq, Time and Prev are set here.
-func (j *Journal) Append(e Event) error {
-	ctx := context.Background()
+func (j *Journal) Append(ctx context.Context, e Event) error {
 	if j.next == 0 {
 		events, lines, err := j.load(ctx)
 		if err != nil {
@@ -63,7 +62,7 @@ func (j *Journal) Append(e Event) error {
 	e.Seq, e.Time, e.Prev = j.next, time.Now().UTC(), j.prev
 	if j.Codec != nil {
 		var err error
-		if e, err = Seal(e, j.Codec); err != nil {
+		if e, err = Seal(ctx, e, j.Codec); err != nil {
 			return err
 		}
 	}
@@ -81,13 +80,13 @@ func (j *Journal) Append(e Event) error {
 }
 
 // Read returns every acknowledged event in order, chain-verified, with sealed events opened.
-func (j *Journal) Read() ([]Event, error) {
-	events, _, err := j.load(context.Background())
+func (j *Journal) Read(ctx context.Context) ([]Event, error) {
+	events, _, err := j.load(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for i := range events {
-		if events[i], err = Open(events[i], j.Codec); err != nil {
+		if events[i], err = Open(ctx, events[i], j.Codec); err != nil {
 			return nil, err
 		}
 	}
@@ -95,8 +94,8 @@ func (j *Journal) Read() ([]Event, error) {
 }
 
 // Head returns the chain link after the last event: anchor it outside the log (chain.go).
-func (j *Journal) Head() (string, error) {
-	_, lines, err := j.load(context.Background())
+func (j *Journal) Head(ctx context.Context) (string, error) {
+	_, lines, err := j.load(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -105,12 +104,12 @@ func (j *Journal) Head() (string, error) {
 
 // Lock takes the store's lease when it has one (Locker). Afterwards the next append re-reads the run:
 // another runner may have written while this one didn't hold the lease.
-func (j *Journal) Lock() (func() error, error) {
+func (j *Journal) Lock(ctx context.Context) (func() error, error) {
 	lk, ok := j.Store.(Locker)
 	if !ok {
 		return nil, ErrNoLocker
 	}
-	unlock, err := lk.Lock()
+	unlock, err := lk.Lock(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package agentsafe
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -31,8 +32,8 @@ import (
 // A Codec encrypts and decrypts a sealed event's content. aad is the event's position (seq, type, call id):
 // a Codec should authenticate it, so a sealed payload moved onto another line fails to open.
 type Codec interface {
-	Seal(plaintext, aad []byte) ([]byte, error)
-	Open(ciphertext, aad []byte) ([]byte, error)
+	Seal(ctx context.Context, plaintext, aad []byte) ([]byte, error)
+	Open(ctx context.Context, ciphertext, aad []byte) ([]byte, error)
 }
 
 // ErrSealed is returned when a sealed event reaches code that would need its content: a Log read without
@@ -61,7 +62,7 @@ func aadOf(e Event) []byte {
 
 // Seal moves e's content into e.Sealed, encrypted by c. Seq, Type and CallID must be final (they're
 // authenticated). Storage backends call it before writing; an event with no content is left as it is.
-func Seal(e Event, c Codec) (Event, error) {
+func Seal(ctx context.Context, e Event, c Codec) (Event, error) {
 	if e.Sealed != "" {
 		return e, errors.New("agentsafe: event is already sealed")
 	}
@@ -74,7 +75,7 @@ func Seal(e Event, c Codec) (Event, error) {
 	if err != nil {
 		return e, err
 	}
-	ct, err := c.Seal(plain, aadOf(e))
+	ct, err := c.Seal(ctx, plain, aadOf(e))
 	if err != nil {
 		return e, fmt.Errorf("sealing event %d: %w", e.Seq, err)
 	}
@@ -84,7 +85,7 @@ func Seal(e Event, c Codec) (Event, error) {
 }
 
 // Open restores a sealed event's content. An unsealed event is returned as it is.
-func Open(e Event, c Codec) (Event, error) {
+func Open(ctx context.Context, e Event, c Codec) (Event, error) {
 	if e.Sealed == "" {
 		return e, nil
 	}
@@ -95,7 +96,7 @@ func Open(e Event, c Codec) (Event, error) {
 	if err != nil {
 		return e, fmt.Errorf("%w: event %d: %w", ErrCannotOpen, e.Seq, err)
 	}
-	plain, err := c.Open(ct, aadOf(e))
+	plain, err := c.Open(ctx, ct, aadOf(e))
 	if err != nil {
 		return e, fmt.Errorf("%w: event %d: %w", ErrCannotOpen, e.Seq, err)
 	}
@@ -117,7 +118,7 @@ type AESGCM struct {
 }
 
 // Seal implements Codec. Output: len(id) | id | 12-byte random nonce | ciphertext+tag.
-func (a AESGCM) Seal(plaintext, aad []byte) ([]byte, error) {
+func (a AESGCM) Seal(_ context.Context, plaintext, aad []byte) ([]byte, error) {
 	if len(a.Current) == 0 || len(a.Current) > 255 {
 		return nil, errors.New("agentsafe: AESGCM.Current must be a key id of 1-255 bytes")
 	}
@@ -135,7 +136,7 @@ func (a AESGCM) Seal(plaintext, aad []byte) ([]byte, error) {
 }
 
 // Open implements Codec.
-func (a AESGCM) Open(ciphertext, aad []byte) ([]byte, error) {
+func (a AESGCM) Open(_ context.Context, ciphertext, aad []byte) ([]byte, error) {
 	if len(ciphertext) < 1 || len(ciphertext) < 1+int(ciphertext[0]) {
 		return nil, errors.New("truncated")
 	}

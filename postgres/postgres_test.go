@@ -152,11 +152,11 @@ func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.stopRenewing() // kill -9: no renewal, no release
-	if _, err := b.Run(id).Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
+	if _, err := b.Run(id).Lock(context.Background()); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("right after the crash the lease is still held, got %v", err)
 	}
 	expire(t, a, id) // the TTL passes with no renewal
-	unlock, err := b.Run(id).Lock()
+	unlock, err := b.Run(id).Lock(context.Background())
 	if err != nil {
 		t.Fatalf("after the TTL a dead holder's lease must be takeable: %v", err)
 	}
@@ -167,16 +167,16 @@ func TestRenewalKeepsALiveHolderSLease(t *testing.T) {
 	a, b := open(t), open(t)
 	a.LeaseTTL = time.Second // renewed every 333ms; generous margins for slow CI machines
 	id := runID(t)
-	unlock, err := a.Run(id).Lock()
+	unlock, err := a.Run(id).Lock(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(3500 * time.Millisecond) // > 3 TTLs: only renewal keeps it
-	if _, err := b.Run(id).Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
+	if _, err := b.Run(id).Lock(context.Background()); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("a live, renewing holder must keep its lease, got %v", err)
 	}
 	_ = unlock()
-	u, err := b.Run(id).Lock()
+	u, err := b.Run(id).Lock(context.Background())
 	if err != nil {
 		t.Fatalf("released: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 	a, b := open(t), open(t)
 	id := runID(t)
 	ja := &agentsafe.Journal{Store: a.Run(id)}
-	if err := ja.Append(agentsafe.Event{Type: agentsafe.EvRunStarted, Task: "t", MaxSteps: 1}); err != nil {
+	if err := ja.Append(context.Background(), agentsafe.Event{Type: agentsafe.EvRunStarted, Task: "t", MaxSteps: 1}); err != nil {
 		t.Fatal(err)
 	}
 	la, err := a.Run(id).acquire(context.Background())
@@ -196,21 +196,21 @@ func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 	}
 	la.stopRenewing() // A "pauses"
 	expire(t, a, id)  // ... for longer than the TTL
-	unlockB, err := b.Run(id).Lock()
+	unlockB, err := b.Run(id).Lock(context.Background())
 	if err != nil {
 		t.Fatalf("B must get the expired lease: %v", err)
 	}
 	defer func() { _ = unlockB() }()
-	if err := (&agentsafe.Journal{Store: b.Run(id)}).Append(agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "budget_exhausted"}); err != nil {
+	if err := (&agentsafe.Journal{Store: b.Run(id)}).Append(context.Background(), agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "budget_exhausted"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ja.Append(agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "stale"}); !errors.Is(err, agentsafe.ErrConflict) {
+	if err := ja.Append(context.Background(), agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "stale"}); !errors.Is(err, agentsafe.ErrConflict) {
 		t.Fatalf("A must be fenced, got %v", err)
 	}
 	if err := la.release(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Run(id).Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
+	if _, err := a.Run(id).Lock(context.Background()); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("A's late release must not free B's lease, got %v", err)
 	}
 }

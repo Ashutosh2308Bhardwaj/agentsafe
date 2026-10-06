@@ -25,7 +25,7 @@ func waitingRun(t *testing.T, z Authorizer) (*Runner, *payTool, string) {
 // and the refusal is on record.
 func mustStillWait(t *testing.T, r *Runner, tool *payTool, key string, denials int) {
 	t.Helper()
-	events, err := r.Log.Read()
+	events, err := r.Log.Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestOutsiderCannotApproveAndTheAttemptIsRecorded(t *testing.T) {
 	}
 	mustStillWait(t, r, tool, key, 2)
 
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	last := events[len(events)-1]
 	if last.Type != EvApprovalDenied || last.By != "cfo" || last.Decision != "rejected" || last.Key != key {
 		t.Fatalf("the refusal must be logged with who, what and which operation: %+v", last)
@@ -165,7 +165,7 @@ func TestDenialCantBeForgedInTheLog(t *testing.T) {
 func TestDenialShowsUpInTheTrace(t *testing.T) {
 	r, _, key := waitingRun(t, AllowList("ops@test"))
 	r.Approve(context.Background(), key, "mallory")
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	tr, err := BuildTrace(events, "t")
 	if err != nil {
 		t.Fatal(err)

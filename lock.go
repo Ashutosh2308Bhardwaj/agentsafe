@@ -1,6 +1,7 @@
 package agentsafe
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -23,11 +24,11 @@ var ErrNoLocker = errors.New("agentsafe: log does not implement Locker; set Runn
 // the model and both act. Idempotency keys stop most duplicate effects, but the two runners interleave
 // events in one log and the run's history stops making sense.
 type Locker interface {
-	Lock() (unlock func() error, err error)
+	Lock(ctx context.Context) (unlock func() error, err error)
 }
 
 // lock takes the run's lock for the duration of one Start / Continue / Extend / Approve / Reject call.
-func (r *Runner) lock() (func(), error) {
+func (r *Runner) lock(ctx context.Context) (func(), error) {
 	lk, ok := r.Log.(Locker)
 	if !ok {
 		if r.Unlocked {
@@ -35,7 +36,7 @@ func (r *Runner) lock() (func(), error) {
 		}
 		return nil, ErrNoLocker
 	}
-	unlock, err := lk.Lock()
+	unlock, err := lk.Lock(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -92,7 +92,7 @@ func (r *Runner) authorize(ctx context.Context, st *State, decision, by, reason 
 	if err == nil {
 		return nil
 	}
-	if lerr := r.emit(st, Event{Type: EvApprovalDenied, CallID: st.Waiting.CallID, Key: st.Waiting.Key,
+	if lerr := r.emit(ctx, st, Event{Type: EvApprovalDenied, CallID: st.Waiting.CallID, Key: st.Waiting.Key,
 		Decision: decision, By: by, Reason: err.Error()}); lerr != nil {
 		return fmt.Errorf("recording a refused approval: %w (refusal: %w)", lerr, err)
 	}

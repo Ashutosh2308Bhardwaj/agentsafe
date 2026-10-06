@@ -42,7 +42,7 @@ var golden = []struct {
 func TestGoldenLogsStillRebuild(t *testing.T) {
 	for _, g := range golden {
 		t.Run(g.file, func(t *testing.T) {
-			events, err := (&FileLog{Path: g.file, Codec: g.codec}).Read()
+			events, err := (&FileLog{Path: g.file, Codec: g.codec}).Read(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ func TestEmitStampsTheCurrentVersion(t *testing.T) {
 	if _, err := r.Start(context.Background(), "sys", "task"); err != nil {
 		t.Fatal(err)
 	}
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	for _, e := range events {
 		if e.V != FormatVersion {
 			t.Fatalf("event %d written as v%d, want v%d", e.Seq, e.V, FormatVersion)

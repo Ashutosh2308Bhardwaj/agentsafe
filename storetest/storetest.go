@@ -39,6 +39,7 @@ func Run(t *testing.T, b Backend) {
 	t.Run("ConcurrentWritersExactlyOneWinsEachLine", func(t *testing.T) { concurrent(t, b) })
 	t.Run("RunsAreIsolated", func(t *testing.T) { isolated(t, b) })
 	t.Run("LeaseIsExclusive", func(t *testing.T) { lease(t, b) })
+	t.Run("CancelledContextStoresNothing", func(t *testing.T) { cancelled(t, b) })
 	t.Run("JournalOnTop", func(t *testing.T) { journal(t, b) })
 }
 
@@ -175,17 +176,17 @@ func lease(t *testing.T, b Backend) {
 		t.Skip("backend has no lease (Locker); runners need Runner.Unlocked, and rely on ErrConflict alone")
 	}
 	lb := b.Reopen(t, a).(agentsafe.Locker)
-	unlock, err := la.Lock()
+	unlock, err := la.Lock(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lb.Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
+	if _, err := lb.Lock(context.Background()); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("a held lease must refuse a second holder with ErrRunLocked, got %v", err)
 	}
 	if err := unlock(); err != nil {
 		t.Fatal(err)
 	}
-	unlockB, err := lb.Lock()
+	unlockB, err := lb.Lock(context.Background())
 	if err != nil {
 		t.Fatalf("a released lease must be available: %v", err)
 	}
@@ -194,8 +195,8 @@ func lease(t *testing.T, b Backend) {
 	}
 	if _, ok := b.NewRun(t).(agentsafe.Locker); ok { // leases are per run
 		other, _ := b.NewRun(t).(agentsafe.Locker)
-		u1, err1 := la.Lock()
-		u2, err2 := other.Lock()
+		u1, err1 := la.Lock(context.Background())
+		u2, err2 := other.Lock(context.Background())
 		if err1 != nil || err2 != nil {
 			t.Fatalf("leases on different runs must not block each other: %v %v", err1, err2)
 		}
@@ -204,29 +205,42 @@ func lease(t *testing.T, b Backend) {
 	}
 }
 
+// A caller that gave up (cancelled, timed out) must not have its line stored afterwards.
+func cancelled(t *testing.T, b Backend) {
+	s := b.NewRun(t)
+	c, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.AppendLine(c, 1, line("late")); err == nil {
+		t.Fatal("AppendLine with a cancelled context must fail")
+	}
+	if got := mustRead(t, s); len(got) != 0 {
+		t.Fatalf("a cancelled append must store nothing, got %d lines", len(got))
+	}
+}
+
 // The full stack on this backend: chained events, a stale Journal fenced, a verified read.
 func journal(t *testing.T, b Backend) {
 	s := b.NewRun(t)
 	j1 := &agentsafe.Journal{Store: s, Key: []byte("k")}
-	if err := j1.Append(agentsafe.Event{Type: agentsafe.EvRunStarted, Task: "t", MaxSteps: 1}); err != nil {
+	if err := j1.Append(context.Background(), agentsafe.Event{Type: agentsafe.EvRunStarted, Task: "t", MaxSteps: 1}); err != nil {
 		t.Fatal(err)
 	}
 	j2 := &agentsafe.Journal{Store: b.Reopen(t, s), Key: []byte("k")}
-	if err := j2.Append(agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "x"}); err != nil {
+	if err := j2.Append(context.Background(), agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := j1.Append(agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "stale"}); !errors.Is(err, agentsafe.ErrConflict) {
+	if err := j1.Append(context.Background(), agentsafe.Event{Type: agentsafe.EvRunPaused, Reason: "stale"}); !errors.Is(err, agentsafe.ErrConflict) {
 		t.Fatalf("a stale Journal must be fenced, got %v", err)
 	}
 	// Fenced once, it re-reads: its next append lands after j2's, chained onto it.
-	if err := j1.Append(agentsafe.Event{Type: agentsafe.EvBudgetExtended, ExtraSteps: 1, By: "ops"}); err != nil {
+	if err := j1.Append(context.Background(), agentsafe.Event{Type: agentsafe.EvBudgetExtended, ExtraSteps: 1, By: "ops"}); err != nil {
 		t.Fatalf("after a conflict the Journal must re-read and append at the real end: %v", err)
 	}
-	events, err := (&agentsafe.Journal{Store: b.Reopen(t, s), Key: []byte("k")}).Read()
+	events, err := (&agentsafe.Journal{Store: b.Reopen(t, s), Key: []byte("k")}).Read(context.Background())
 	if err != nil || len(events) != 3 || events[1].Reason != "x" || events[2].Seq != 3 {
 		t.Fatalf("want 3 verified events, the second from j2: %v %v", events, err)
 	}
-	if _, err := (&agentsafe.Journal{Store: b.Reopen(t, s), Key: []byte("wrong")}).Read(); !errors.Is(err, agentsafe.ErrTampered) {
+	if _, err := (&agentsafe.Journal{Store: b.Reopen(t, s), Key: []byte("wrong")}).Read(context.Background()); !errors.Is(err, agentsafe.ErrTampered) {
 		t.Fatalf("the chain must verify on this backend (wrong key = tampered), got %v", err)
 	}
 }

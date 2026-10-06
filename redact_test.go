@@ -73,7 +73,7 @@ func TestConsoleOutputIsRedactedButTheRunUsesRealValues(t *testing.T) {
 		t.Fatalf("the console should still say what happened, masked:\n%s", printed)
 	}
 	// The log keeps the real values: it is what a resume would hand back to the model.
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	var real bool
 	for _, e := range events {
 		real = real || strings.Contains(e.Args, "9876543210")
@@ -108,7 +108,7 @@ func TestTraceRedactMasksContentKeepsStructure(t *testing.T) {
 	st, _ := r.Start(context.Background(), "sys", "task")
 	_, _ = r.Approve(context.Background(), st.Waiting.Key, "mallory")
 	_, _ = r.Approve(context.Background(), st.Waiting.Key, "ops@test")
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	tr, err := BuildTrace(events, "t")
 	if err != nil {
 		t.Fatal(err)

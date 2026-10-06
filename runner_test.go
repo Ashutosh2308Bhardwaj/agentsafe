@@ -38,7 +38,7 @@ func TestRunToCompletion(t *testing.T) {
 		t.Fatalf("status=%s stop=%s text=%q tool=%d model=%d", st.Status, st.Stop, st.Text, tool.calls, model.Calls)
 	}
 	// The log alone reproduces the final state.
-	events, _ := r.Log.Read()
+	events, _ := r.Log.Read(context.Background())
 	rebuilt, err := Rebuild(events)
 	if err != nil || rebuilt.Status != StatusFinished || len(rebuilt.Messages) != len(st.Messages) {
 		t.Fatalf("rebuild mismatch: %v %+v", err, rebuilt)

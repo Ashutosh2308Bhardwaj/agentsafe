@@ -24,7 +24,7 @@ func TestSecondRunnerIsLockedOut(t *testing.T) {
 	}
 
 	holder := &FileLog{Path: path}
-	unlock, err := holder.Lock()
+	unlock, err := holder.Lock(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,12 +32,12 @@ func TestSecondRunnerIsLockedOut(t *testing.T) {
 	if _, err := r2.Extend(context.Background(), 5, "test"); !errors.Is(err, ErrRunLocked) {
 		t.Fatalf("while another runner holds the run, want ErrRunLocked, got %v", err)
 	}
-	events, _ := holder.Read()
+	events, _ := holder.Read(context.Background())
 	before := len(events)
 	if err := unlock(); err != nil {
 		t.Fatal(err)
 	}
-	if after, _ := holder.Read(); len(after) != before {
+	if after, _ := holder.Read(context.Background()); len(after) != before {
 		t.Fatal("a locked-out runner must not have written anything")
 	}
 	if st, err := r2.Extend(context.Background(), 5, "test"); err != nil || st.Status != StatusFinished {
@@ -91,7 +91,7 @@ func TestConcurrentRunnersOnlyOneDrives(t *testing.T) {
 	if won < 1 || locked < 1 {
 		t.Fatalf("want one driver and the rest locked out, got won=%d locked=%d (%v)", won, locked, results)
 	}
-	events, err := (&FileLog{Path: path}).Read()
+	events, err := (&FileLog{Path: path}).Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,14 +122,14 @@ func TestLockReleasedWhenHolderIsKilled(t *testing.T) {
 	if line, err := bufio.NewReader(out).ReadString('\n'); err != nil || line != "locked\n" {
 		t.Fatalf("helper didn't take the lock: %q %v", line, err)
 	}
-	if _, err := (&FileLog{Path: path}).Lock(); !errors.Is(err, ErrRunLocked) {
+	if _, err := (&FileLog{Path: path}).Lock(context.Background()); !errors.Is(err, ErrRunLocked) {
 		t.Fatalf("while the helper is alive the run must be locked, got %v", err)
 	}
 	if err := cmd.Process.Kill(); err != nil { // SIGKILL on Unix, TerminateProcess on Windows: no cleanup runs
 		t.Fatal(err)
 	}
 	_ = cmd.Wait()
-	unlock, err := (&FileLog{Path: path}).Lock()
+	unlock, err := (&FileLog{Path: path}).Lock(context.Background())
 	if err != nil {
 		t.Fatalf("after the holder was killed the lock must be free, got %v", err)
 	}
@@ -142,7 +142,7 @@ func TestHelperHoldLock(_ *testing.T) {
 	if path == "" {
 		return
 	}
-	if _, err := (&FileLog{Path: path}).Lock(); err != nil {
+	if _, err := (&FileLog{Path: path}).Lock(context.Background()); err != nil {
 		fmt.Println("error:", err)
 		os.Exit(1)
 	}
@@ -153,12 +153,12 @@ func TestHelperHoldLock(_ *testing.T) {
 // memLog is a Log without a Locker, like a naive custom implementation.
 type memLog struct{ events []Event }
 
-func (m *memLog) Append(e Event) error {
+func (m *memLog) Append(_ context.Context, e Event) error {
 	e.Seq = len(m.events) + 1
 	m.events = append(m.events, e)
 	return nil
 }
-func (m *memLog) Read() ([]Event, error) { return m.events, nil }
+func (m *memLog) Read(context.Context) ([]Event, error) { return m.events, nil }
 
 func TestRunnerRequiresALockerUnlessOptedOut(t *testing.T) {
 	model := &ScriptedModel{Final: "done"}
@@ -178,16 +178,16 @@ func TestSequenceStaysContiguousAcrossProcesses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run.jsonl")
 	a, b := &FileLog{Path: path}, &FileLog{Path: path}
 	for i, l := range []*FileLog{a, b, a, b, a} {
-		unlock, err := l.Lock()
+		unlock, err := l.Lock(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := l.Append(Event{Type: EvRunStarted, Task: fmt.Sprint(i)}); err != nil {
+		if err := l.Append(context.Background(), Event{Type: EvRunStarted, Task: fmt.Sprint(i)}); err != nil {
 			t.Fatal(err)
 		}
 		_ = unlock()
 	}
-	events, _ := a.Read()
+	events, _ := a.Read(context.Background())
 	for i, e := range events {
 		if e.Seq != i+1 {
 			b, _ := json.Marshal(events)
