@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,3 +86,27 @@ func (gatedOnly) Spec() ToolSpec {
 func (gatedOnly) Call(context.Context, json.RawMessage) (any, error) { return nil, nil }
 func (gatedOnly) NeedsApproval(json.RawMessage) bool                 { return true }
 func (gatedOnly) Summary(json.RawMessage) (any, error)               { return nil, nil }
+
+// A Runner written as a struct literal gets the same checks as New, before it reads or writes anything.
+func TestStructLiteralRunnerIsValidatedBeforeItActs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r.jsonl")
+	r := &Runner{Model: &ScriptedModel{Final: "x"}, Log: &FileLog{Path: path},
+		Tools: []Tool{&plain{name: "export"}, &plain{name: "export"}}} // two tools, one name
+	for name, call := range map[string]func() error{
+		"Start":    func() error { _, err := r.Start(context.Background(), "s", "t"); return err },
+		"Continue": func() error { _, err := r.Continue(context.Background()); return err },
+		"Approve":  func() error { _, err := r.Approve(context.Background(), "k", "ops"); return err },
+		"Extend":   func() error { _, err := r.Extend(context.Background(), 1, "ops"); return err },
+	} {
+		if err := call(); !errors.Is(err, ErrConfig) || !strings.Contains(err.Error(), `two tools are named "export"`) {
+			t.Errorf("%s must refuse a misconfigured Runner with ErrConfig, got %v", name, err)
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("nothing may be written by a misconfigured Runner")
+	}
+	noLease := &Runner{Model: &ScriptedModel{Final: "x"}, Log: &memLog{}}
+	if _, err := noLease.Start(context.Background(), "s", "t"); !errors.Is(err, ErrConfig) || !errors.Is(err, ErrNoLocker) {
+		t.Fatalf("a log with no lease is still ErrNoLocker, now also ErrConfig: %v", err)
+	}
+}

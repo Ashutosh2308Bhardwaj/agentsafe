@@ -135,7 +135,8 @@ func forgeApproval(t *testing.T, path string, st State) {
 func TestForgedApprovalIsRefusedWithAKey(t *testing.T) {
 	r, tool, st := pausedForApproval(t, []byte("secret-not-on-this-host"))
 	forgeApproval(t, r.Log.(*FileLog).Path, st)
-	r2 := &Runner{Model: r.Model, Tools: r.Tools, Log: &FileLog{Path: r.Log.(*FileLog).Path, Key: []byte("secret-not-on-this-host")}}
+	r2 := &Runner{Model: r.Model, Tools: r.Tools, Authorizer: r.Authorizer,
+		Log: &FileLog{Path: r.Log.(*FileLog).Path, Key: []byte("secret-not-on-this-host")}}
 	if _, err := r2.Continue(context.Background()); !errors.Is(err, ErrTampered) {
 		t.Fatalf("a forged approval must stop the run, got %v", err)
 	}

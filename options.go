@@ -19,7 +19,8 @@ type Option func(*Runner)
 //		agentsafe.WithAuthorizer(agentsafe.AllowList("ops@example.com")),
 //		agentsafe.WithStartedBy("scheduler"))
 //
-// A Runner can also be written as a struct literal; call Validate before using it.
+// A Runner can also be written as a struct literal: it is validated the same way the first time it's used
+// (every Start, Continue, Approve, Reject and Extend checks it), so both forms behave alike.
 func New(model Model, log Log, opts ...Option) (*Runner, error) {
 	r := &Runner{Model: model, Log: log}
 	for _, o := range opts {
@@ -85,7 +86,7 @@ func (r *Runner) Validate() error {
 	if r.Log == nil {
 		bad("no Log")
 	} else if _, ok := r.Log.(Locker); !ok && !r.Unlocked {
-		bad("the Log has no lease (Locker); use a Log that has one, or WithoutLease to rely on fencing alone")
+		bad("the Log has no lease (Locker); use a Log that has one, or WithoutLease to rely on fencing alone (%w)", ErrNoLocker)
 	}
 	if r.MaxSteps < 0 || r.ToolTimeout < 0 || r.ToolAttempts < 0 || r.ToolBackoff < 0 {
 		bad("MaxSteps, ToolTimeout, ToolAttempts and ToolBackoff can't be negative")

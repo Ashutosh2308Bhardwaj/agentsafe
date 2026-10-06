@@ -42,7 +42,19 @@ func mustStillWait(t *testing.T, r *Runner, tool *payTool, key string, denials i
 }
 
 func TestNoAuthorizerRefusesEveryDecision(t *testing.T) {
-	r, tool, key := waitingRun(t, nil)
+	// A run whose gated tools nobody may approve doesn't start at all: nothing is written.
+	unstartable, _ := payRun(t, `{"ref":"T1007","amount":11000}`)
+	unstartable.Authorizer = nil
+	if _, err := unstartable.Start(context.Background(), "sys", "task"); !errors.Is(err, ErrConfig) || !errors.Is(err, ErrNoAuthorizer) {
+		t.Fatalf("a gate nobody may open must stop the run before it starts, got %v", err)
+	}
+	if events, _ := unstartable.Log.Read(context.Background()); len(events) != 0 {
+		t.Fatalf("nothing may be written for a run that can't be configured, got %d events", len(events))
+	}
+
+	// A waiting run whose policy is taken away refuses every decision.
+	r, tool, key := waitingRun(t, AllowList("ops@test"))
+	r.Authorizer = nil
 	if _, err := r.Approve(context.Background(), key, "cfo"); !errors.Is(err, ErrNoAuthorizer) {
 		t.Fatalf("an unconfigured gate must refuse, got %v", err)
 	}

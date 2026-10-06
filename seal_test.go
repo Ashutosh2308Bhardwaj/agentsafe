@@ -82,7 +82,7 @@ func TestSealedRunResumesAfterACrashAndPaysOnce(t *testing.T) {
 		_, _ = r.Approve(context.Background(), st.Waiting.Key, "ops@test")
 	}()
 	// A new process: new FileLog, same path, same keys.
-	r2 := &Runner{Model: r.Model, Tools: r.Tools, Log: &FileLog{Path: r.Log.(*FileLog).Path, Codec: k1}}
+	r2 := &Runner{Model: r.Model, Tools: r.Tools, Authorizer: r.Authorizer, Log: &FileLog{Path: r.Log.(*FileLog).Path, Codec: k1}}
 	st, err := r2.Continue(context.Background())
 	if err != nil || tool.paid != 1 || st.Status != StatusFinished {
 		t.Fatalf("resume from a sealed log must not pay twice: err=%v paid=%d status=%s", err, tool.paid, st.Status)

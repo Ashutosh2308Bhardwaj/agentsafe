@@ -29,6 +29,11 @@ type Locker interface {
 
 // lock takes the run's lock for the duration of one Start / Continue / Extend / Approve / Reject call.
 func (r *Runner) lock(ctx context.Context) (func(), error) {
+	// Every entry point comes through here first: a Runner written as a struct literal gets the same checks
+	// as one built with New, before it reads or writes anything.
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
 	lk, ok := r.Log.(Locker)
 	if !ok {
 		if r.Unlocked {
