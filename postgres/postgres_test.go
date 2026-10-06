@@ -134,9 +134,18 @@ func TestRacingForDifferentLinesLeavesNoGaps(t *testing.T) {
 	}
 }
 
+// expire makes the run's lease run out now (on the database clock): "time passes" as an explicit step, not a
+// sleep that a slow CI machine can overshoot.
+func expire(t *testing.T, d *DB, run string) {
+	t.Helper()
+	if _, err := d.pool.Exec(context.Background(),
+		`UPDATE agentsafe_leases SET expires_at = now() - interval '1 millisecond' WHERE run_id = $1`, run); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 	a, b := open(t), open(t)
-	a.LeaseTTL, b.LeaseTTL = 300*time.Millisecond, 300*time.Millisecond
 	id := runID(t)
 	l, err := a.Run(id).acquire(context.Background())
 	if err != nil {
@@ -146,7 +155,7 @@ func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 	if _, err := b.Run(id).Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("right after the crash the lease is still held, got %v", err)
 	}
-	time.Sleep(450 * time.Millisecond)
+	expire(t, a, id) // the TTL passes with no renewal
 	unlock, err := b.Run(id).Lock()
 	if err != nil {
 		t.Fatalf("after the TTL a dead holder's lease must be takeable: %v", err)
@@ -156,13 +165,13 @@ func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 
 func TestRenewalKeepsALiveHolderSLease(t *testing.T) {
 	a, b := open(t), open(t)
-	a.LeaseTTL, b.LeaseTTL = 300*time.Millisecond, 300*time.Millisecond
+	a.LeaseTTL = time.Second // renewed every 333ms; generous margins for slow CI machines
 	id := runID(t)
 	unlock, err := a.Run(id).Lock()
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second) // > 3 TTLs: only renewal keeps it
+	time.Sleep(3500 * time.Millisecond) // > 3 TTLs: only renewal keeps it
 	if _, err := b.Run(id).Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("a live, renewing holder must keep its lease, got %v", err)
 	}
@@ -176,7 +185,6 @@ func TestRenewalKeepsALiveHolderSLease(t *testing.T) {
 
 func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 	a, b := open(t), open(t)
-	a.LeaseTTL, b.LeaseTTL = 300*time.Millisecond, 300*time.Millisecond
 	id := runID(t)
 	ja := &agentsafe.Journal{Store: a.Run(id)}
 	if err := ja.Append(agentsafe.Event{Type: agentsafe.EvRunStarted, Task: "t", MaxSteps: 1}); err != nil {
@@ -187,7 +195,7 @@ func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	la.stopRenewing() // A "pauses"
-	time.Sleep(450 * time.Millisecond)
+	expire(t, a, id) // ... for longer than the TTL
 	unlockB, err := b.Run(id).Lock()
 	if err != nil {
 		t.Fatalf("B must get the expired lease: %v", err)

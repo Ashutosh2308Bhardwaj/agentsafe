@@ -37,10 +37,19 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// expire makes the run's lease run out now: "time passes" as an explicit step, not a sleep that a slow CI
+// machine can overshoot.
+func expire(t *testing.T, d *DB, run string) {
+	t.Helper()
+	if _, err := d.db.Exec(`UPDATE agentsafe_leases SET expires_at = ? WHERE run_id = ?`,
+		time.Now().Add(-time.Millisecond).UnixMilli(), run); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.db")
 	a, b := open(t, path), open(t, path)
-	a.LeaseTTL, b.LeaseTTL = 150*time.Millisecond, 150*time.Millisecond
 	l, err := a.Run("r").acquire()
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +58,7 @@ func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 	if _, err := b.Run("r").Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("right after the crash the lease is still held, got %v", err)
 	}
-	time.Sleep(250 * time.Millisecond)
+	expire(t, a, "r") // the TTL passes with no renewal
 	unlock, err := b.Run("r").Lock()
 	if err != nil {
 		t.Fatalf("after the TTL a dead holder's lease must be takeable: %v", err)
@@ -60,12 +69,12 @@ func TestLeaseExpiresWhenItsHolderDies(t *testing.T) {
 func TestRenewalKeepsALiveHolderSLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.db")
 	a, b := open(t, path), open(t, path)
-	a.LeaseTTL, b.LeaseTTL = 150*time.Millisecond, 150*time.Millisecond
+	a.LeaseTTL = time.Second // renewed every 333ms; generous margins for slow CI machines
 	unlock, err := a.Run("r").Lock()
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond) // > 3 TTLs: only renewal keeps it
+	time.Sleep(3500 * time.Millisecond) // > 3 TTLs: only renewal keeps it
 	if _, err := b.Run("r").Lock(); !errors.Is(err, agentsafe.ErrRunLocked) {
 		t.Fatalf("a live, renewing holder must keep its lease, got %v", err)
 	}
@@ -82,7 +91,6 @@ func TestRenewalKeepsALiveHolderSLease(t *testing.T) {
 func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.db")
 	a, b := open(t, path), open(t, path)
-	a.LeaseTTL, b.LeaseTTL = 150*time.Millisecond, 150*time.Millisecond
 	ja := &agentsafe.Journal{Store: a.Run("r")}
 	if err := ja.Append(agentsafe.Event{Type: agentsafe.EvRunStarted, Task: "t", MaxSteps: 1}); err != nil {
 		t.Fatal(err)
@@ -92,7 +100,7 @@ func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	la.stopRenewing() // A "pauses"
-	time.Sleep(250 * time.Millisecond)
+	expire(t, a, "r") // ... for longer than the TTL
 	unlockB, err := b.Run("r").Lock()
 	if err != nil {
 		t.Fatalf("B must get the expired lease: %v", err)
