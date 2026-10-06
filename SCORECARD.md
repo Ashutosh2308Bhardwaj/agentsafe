@@ -2,9 +2,9 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 27 / 35 → 77 / 100** (after step 5.3, coverage; phase 5 done)
+**Current: 29 / 35 → 83 / 100** (after step 6.1, SECURITY.md + CONTRIBUTING.md)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71 → 5.2 property tests 74 → 5.3 coverage 77
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71 → 5.2 property tests 74 → 5.3 coverage 77 → 6.1 security + contributing 83
 
 ## Correctness (5/5)
 - [x] `go test -race` clean on every package
@@ -42,10 +42,10 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [x] Runnable `Example` functions on pkg.go.dev for every primitive: core (`example_test.go`: the payout flow, New, Func, crash resume, authorized approvals, sealed log, Reconcile, Same, redaction, traces), `tooltest`, `sqlite` (all output-checked by `go test`); `postgres`, `anthropic`, `gemini` (compiled; they need a server or a key)
 - [x] 5-minute quickstart in the README: offline, no API key; pay-once-after-approval across three processes; `examples/quickstart` is tested as three real processes, and a test fails if the README block differs from it
 
-## Release hygiene (1/7)
+## Release hygiene (3/7)
 - [x] LICENSE (Apache-2.0)
-- [ ] SECURITY.md (how to report a vulnerability)
-- [ ] CONTRIBUTING.md
+- [x] SECURITY.md (how to report a vulnerability): private reporting via GitHub advisories; what counts (duplicate effects, approval bypass, history forgery, sealed-data exposure, wrong reconciliation, exhaustion from model input, fencing failure) and what doesn't
+- [x] CONTRIBUTING.md: setup, the gates, "a test that fails without it" (and that the broken version compiles), no dependencies in the core, format and key compatibility rules, backends must pass storetest
 - [ ] CHANGELOG.md
 - [ ] Semver tag (v0.x until the API is stable)
 - [ ] Threat model
