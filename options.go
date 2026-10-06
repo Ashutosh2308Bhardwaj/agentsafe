@@ -111,6 +111,9 @@ func (r *Runner) Validate() error {
 		if c, ok := t.(interface{ configErr() error }); ok && c.configErr() != nil {
 			errs = append(errs, c.configErr())
 		}
+		if w, ok := t.(interface{ wantsApproval() bool }); ok && w.wantsApproval() {
+			gated = true
+		}
 		if _, ok := t.(Gated); ok {
 			gated = true
 			if _, ok := t.(IdempotentTool); !ok {

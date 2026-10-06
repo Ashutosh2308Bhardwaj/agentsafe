@@ -146,6 +146,10 @@ func (f *funcTool) errf(format string, a ...any) {
 
 func (f *funcTool) configErr() error { return f.err }
 
+// wantsApproval: asked for NeedsApproval, even if misconfigured, so Validate reports a missing approval
+// policy in the same pass as the misconfiguration.
+func (f *funcTool) wantsApproval() bool { return f.needsApproval != nil }
+
 func (f *funcTool) Spec() ToolSpec {
 	return ToolSpec{Name: f.name, Description: f.description, Parameters: f.schema}
 }
