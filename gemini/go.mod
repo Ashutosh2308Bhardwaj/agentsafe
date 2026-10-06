@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/gemini
 go 1.25.0
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.0.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.1.0
 	google.golang.org/genai v1.72.0
 )
 
@@ -33,6 +33,3 @@ require (
 	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
-
-// Until the core is tagged, build against the core in this repository.
-replace github.com/Ashutosh2308Bhardwaj/agentsafe => ../

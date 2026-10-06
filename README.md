@@ -1,6 +1,6 @@
 # agentsafe
 
-> **Status: pre-1.0.** The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
+> **Status: v0.1.0, pre-1.0** ([CHANGELOG](CHANGELOG.md)). The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
 
 ```bash
 go get github.com/Ashutosh2308Bhardwaj/agentsafe

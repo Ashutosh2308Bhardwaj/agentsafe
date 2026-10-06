@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/anthropic
 go 1.25
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.0.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.1.0
 	github.com/anthropics/anthropic-sdk-go v1.78.0
 )
 
@@ -20,6 +20,3 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 )
-
-// Until the core is tagged, build against the core in this repository.
-replace github.com/Ashutosh2308Bhardwaj/agentsafe => ../

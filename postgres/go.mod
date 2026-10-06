@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/postgres
 go 1.25.0
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.0.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 
@@ -14,6 +14,3 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
-
-// Until the core is tagged, build against the core in this repository.
-replace github.com/Ashutosh2308Bhardwaj/agentsafe => ../

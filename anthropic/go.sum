@@ -1,3 +1,5 @@
+github.com/Ashutosh2308Bhardwaj/agentsafe v0.1.0 h1:gBoW+IuCGRgIHsJJUEwUU7oaf2n6n3Df8ACf+MdDmTg=
+github.com/Ashutosh2308Bhardwaj/agentsafe v0.1.0/go.mod h1:Qazy43WFA7E8rmKGByfAL2Bb3ocO7eCzreVu0SUdQCI=
 github.com/anthropics/anthropic-sdk-go v1.78.0 h1:8uluL7g84HtSSm347tMGtrUuCEBLmme7vOcFCMn7bnk=
 github.com/anthropics/anthropic-sdk-go v1.78.0/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPnH1Wvgk=
