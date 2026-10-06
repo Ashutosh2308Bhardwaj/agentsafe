@@ -195,7 +195,7 @@ func TestHolderThatLostItsLeaseIsFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	la.stopRenewing() // A "pauses"
-	expire(t, a, id) // ... for longer than the TTL
+	expire(t, a, id)  // ... for longer than the TTL
 	unlockB, err := b.Run(id).Lock()
 	if err != nil {
 		t.Fatalf("B must get the expired lease: %v", err)
