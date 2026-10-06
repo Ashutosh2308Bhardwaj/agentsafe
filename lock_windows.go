@@ -45,3 +45,14 @@ func unlockFile(f *os.File) error {
 	}
 	return nil
 }
+
+// waitLock takes an exclusive lock, waiting for it.
+func waitLock(f *os.File) error {
+	var ol syscall.Overlapped
+	r1, _, err := procLockFileEx.Call(f.Fd(), lockfileExclusiveLock, 0, 1, 0,
+		uintptr(unsafe.Pointer(&ol))) //nolint:gosec // required by the Win32 API
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}

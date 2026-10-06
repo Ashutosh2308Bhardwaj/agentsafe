@@ -1,11 +1,9 @@
 package agentsafe
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 )
 
@@ -91,13 +89,9 @@ type Log interface {
 // rather than skipped: skipping it would silently delete something that really happened.
 var ErrCorruptLog = errors.New("agentsafe: log is corrupt")
 
-// FileLog is a JSON-lines Log on disk. Every Append is fsync'd before it returns, so an event that
-// Append reported as written survives kill -9 and power loss.
-//
-// Torn tails: a crash or power cut in the middle of an Append can leave a partial last line. That event was
-// never acknowledged (Append hadn't returned), so nothing acted on it, and dropping it is exactly as if the
-// crash had happened just before the write. Read ignores a torn tail; the next Append cuts it off the file
-// before writing.
+// FileLog is a JSON-lines Log on disk: a Journal over a file. Every Append is fsync'd before it returns, so
+// an event that Append reported as written survives kill -9 and power loss. A torn last line (a crash in the
+// middle of a write) is ignored by Read and cut off by the next Append; see filestore.go.
 type FileLog struct {
 	Path string
 	// Key, if set, makes the chain an HMAC-SHA256 chain: without the key, an attacker who rewrites the whole
@@ -107,156 +101,43 @@ type FileLog struct {
 	// chain covers the sealed line, so tampering is still detected without the Codec's keys.
 	Codec Codec
 
-	next int    // next sequence number; 0 = not yet loaded (re-read, and the tail repaired, on next Append)
-	prev string // chain link for the next line: hash of the last acknowledged line
+	j *Journal
 }
 
-// Append writes e as the next line. Seq and Time are set here.
-func (l *FileLog) Append(e Event) error {
-	if l.next == 0 {
-		n, last, err := l.repair()
-		if err != nil {
-			return err
-		}
-		l.next, l.prev = n+1, l.link(last)
+func (l *FileLog) journal() *Journal {
+	if l.j == nil {
+		l.j = &Journal{Store: newFileStore(l.Path)}
 	}
-	e.Seq, e.Time, e.Prev = l.next, time.Now().UTC(), l.prev
-	if l.Codec != nil {
-		var err error
-		if e, err = Seal(e, l.Codec); err != nil {
-			return err
-		}
-	}
-	line, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	// 0600: the log holds tool arguments and results (payees, amounts, account ids): owner-only.
-	f, err := os.OpenFile(l.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		_ = f.Close() // the write error is the one that matters
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close() // the sync error is the one that matters
-		return err
-	}
-	l.next++
-	l.prev = l.hash(line)
-	return f.Close()
+	l.j.Key, l.j.Codec = l.Key, l.Codec
+	return l.j
 }
+
+// Append writes e as the next line. Seq, Time and Prev are set here.
+func (l *FileLog) Append(e Event) error { return l.journal().Append(e) }
 
 // Read returns every acknowledged event in order, ignoring a torn tail. A missing file is an empty log.
 // Sealed events are opened with the Codec; without it, a sealed log is refused (ErrSealed).
 func (l *FileLog) Read() ([]Event, error) {
-	events, _, _, err := l.load()
+	events, err := l.journal().Read()
 	if err != nil {
-		return nil, err
-	}
-	for i := range events {
-		if events[i], err = Open(events[i], l.Codec); err != nil {
-			return nil, fmt.Errorf("%s: %w", l.Path, err)
-		}
+		return nil, fmt.Errorf("%s: %w", l.Path, err)
 	}
 	return events, nil
 }
 
-// repair cuts a torn tail off the file, so the next line isn't glued onto half a line, and returns the
-// number of acknowledged events. Only the run's writer (the lock holder) calls it, via Append.
-func (l *FileLog) repair() (int, []byte, error) {
-	events, last, good, err := l.load()
-	if err != nil {
-		return 0, nil, err
-	}
-	info, err := os.Stat(l.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil, nil
-	}
-	if err != nil {
-		return 0, nil, err
-	}
-	if info.Size() == good {
-		return len(events), last, nil
-	}
-	f, err := os.OpenFile(l.Path, os.O_WRONLY, 0o600)
-	if err != nil {
-		return 0, nil, err
-	}
-	if err := f.Truncate(good); err != nil {
-		_ = f.Close()
-		return 0, nil, err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return 0, nil, err
-	}
-	return len(events), last, f.Close()
-}
+// Head returns the hash of the last acknowledged line: anchor it outside the log to make an edit of the
+// last event, or a truncation, detectable. An empty log's head is "genesis".
+func (l *FileLog) Head() (string, error) { return l.journal().Head() }
 
-// load reads, scans and chain-verifies the file. It returns the acknowledged events, the last acknowledged
-// line (without its newline, for the next chain link), and the byte length they occupy.
-func (l *FileLog) load() ([]Event, []byte, int64, error) {
-	data, err := os.ReadFile(l.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, 0, nil
-	}
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	events, lines, good, err := scanLines(data)
-	if err != nil {
-		return nil, nil, 0, fmt.Errorf("%s: %w", l.Path, err)
-	}
-	if err := l.verify(events, lines); err != nil {
-		return nil, nil, 0, fmt.Errorf("%s: %w", l.Path, err)
-	}
-	var last []byte
-	if len(lines) > 0 {
-		last = lines[len(lines)-1]
-	}
-	return events, last, good, nil
-}
+// Lock takes the run's lease: an exclusive OS lock on "<Path>.lock", released by the OS when the holder
+// exits, however it exits (filestore.go).
+func (l *FileLog) Lock() (func() error, error) { return l.journal().Lock() }
 
-// scanLines parses a JSON-lines log. It returns the acknowledged events and the byte length they occupy.
-//
-//	bytes after the last newline       an unfinished write: torn, dropped
-//	a last line that doesn't parse     a torn write (e.g. zero-filled blocks after power loss): dropped
-//	a bad line with good lines after   damaged acknowledged history: ErrCorruptLog
-func scanLines(data []byte) ([]Event, [][]byte, int64, error) {
-	var events []Event
-	var kept [][]byte
-	var good int64
-	lines := bytes.SplitAfter(data, []byte{'\n'})
-	for i, raw := range lines {
-		if len(raw) == 0 {
-			continue
-		}
-		complete := raw[len(raw)-1] == '\n'
-		if !complete { // the final fragment: never acknowledged
-			break
-		}
-		var e Event
-		if err := json.Unmarshal(bytes.TrimSpace(raw), &e); err != nil {
-			if laterData(lines[i+1:]) {
-				return nil, nil, 0, fmt.Errorf("%w: line %d can't be read and later lines exist: %w", ErrCorruptLog, i+1, err)
-			}
-			break // the last line, unreadable: a torn write
-		}
-		events = append(events, e)
-		kept = append(kept, lineContent(raw))
-		good += int64(len(raw))
+// load reads and verifies the file; events are returned still sealed.
+func (l *FileLog) load() ([]Event, error) {
+	events, _, err := l.journal().load(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", l.Path, err)
 	}
-	return events, kept, good, nil
-}
-
-func laterData(rest [][]byte) bool {
-	for _, r := range rest {
-		if len(bytes.TrimSpace(r)) > 0 {
-			return true
-		}
-	}
-	return false
+	return events, nil
 }

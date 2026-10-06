@@ -22,3 +22,13 @@ func tryLock(f *os.File) error {
 func unlockFile(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }
+
+// waitLock takes an exclusive flock, waiting for it.
+func waitLock(f *os.File) error {
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) { // a signal interrupted the wait: wait again
+			return err
+		}
+	}
+}

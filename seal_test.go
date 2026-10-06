@@ -108,7 +108,7 @@ func TestSealedLogWithoutTheKeyIsRefusedNotReadAsEmpty(t *testing.T) {
 		t.Fatalf("wrong key: want ErrCannotOpen, got %v", err)
 	}
 	// Events that were never opened can't be rebuilt, by any route.
-	raw, _, _, err := (&FileLog{Path: path}).load()
+	raw, err := (&FileLog{Path: path}).load()
 	if err != nil {
 		t.Fatalf("the chain must verify without the key: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestTamperingWithSealedContentIsDetectedWithoutTheKey(t *testing.T) {
 	if err := os.WriteFile(path, flipped, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := (&FileLog{Path: path}).load(); !errors.Is(err, ErrTampered) {
+	if _, err := (&FileLog{Path: path}).load(); !errors.Is(err, ErrTampered) {
 		t.Fatalf("an auditor without the key must still detect the edit, got %v", err)
 	}
 }

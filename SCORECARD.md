@@ -15,7 +15,7 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 
 ## Production blockers (8/9)
 - [x] Run lease: two processes can't both drive one run. File log: OS lock (flock / LockFileEx), released by the kernel even on kill -9 (`lock_test.go`). Database backends: lease + fencing tokens, verified by the conformance suite in phase 3
-- [ ] Storage interface with SQLite and Postgres backends (separate modules; the core stays dependency-free)
+- [ ] Storage interface with SQLite and Postgres backends (separate modules; the core stays dependency-free). Progress: 3.1 done (`LineStore` + `Journal` + `storetest` conformance suite, file backend passes, fencing by conditional append); SQLite 3.2, Postgres 3.3 to go
 - [x] Versioned log format with a migration story: every event carries `v`; older events upgraded on read, newer refused (`ErrNewerLogFormat`); golden logs incl. a real v0 run must keep rebuilding ([FORMAT.md](FORMAT.md))
 - [x] Recovery from a torn last line (power loss mid-append): unacknowledged tail dropped and repaired on next append; damage before valid lines refused (`ErrCorruptLog`); proven by cutting a real log at every byte (`torn_test.go`)
 - [x] Tamper-evident log: every line links to the hash of the one before (optional HMAC key); every Read verifies, a tampered run is refused (`ErrTampered`); `Head()` for anchoring the last line (`chain.go`, `chain_test.go`)
