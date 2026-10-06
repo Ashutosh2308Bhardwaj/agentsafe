@@ -15,6 +15,9 @@ The core package is split so each part can be found and used on its own. To migr
 | `agentsafe.OpenAICompatible{...}` | `openai.Model{...}` (`github.com/Ashutosh2308Bhardwaj/agentsafe/openai`), same fields |
 | `agentsafe.BuildTrace(events, agent)` | `trace.Build(events, agent)` (`.../agentsafe/trace`) |
 | `agentsafe.Trace`, `Span`, `SpanEvent`, `Attr` | `trace.Trace`, `trace.Span`, `trace.SpanEvent`, `trace.Attr`; methods unchanged (`Tree`, `OTLPJSON`, `Redact`) |
+| `agentsafe.Reconcile(expected, actual, events, claims)` | `reconcile.Audit(expected, actual, events, claims)` (`.../agentsafe/reconcile`) |
+| `agentsafe.Effect`, `Claim`, `Report`, `Finding`, `Severity`, `Critical`, `Error`, `Warn`, `Same` | the same names in `reconcile` |
+| `agentsafe.Decimal` | unchanged (used by `Func` schemas and by `reconcile`) |
 
 ### Changed
 

@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	"github.com/Ashutosh2308Bhardwaj/agentsafe/reconcile"
 )
 
 // The checker's "what should exist" and the planted ground truth are derived independently. They must agree,
@@ -23,7 +23,7 @@ func TestExpectedMatchesGroundTruth(t *testing.T) {
 	if err := json.Unmarshal(b, &truth); err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]agentsafe.Effect{}
+	got := map[string]reconcile.Effect{}
 	pays := 0
 	for _, e := range exp {
 		if e.Kind == "payment" {
@@ -42,7 +42,7 @@ func TestExpectedMatchesGroundTruth(t *testing.T) {
 			t.Fatalf("%s is in the ground truth but not expected", id)
 		}
 		for field, want := range map[string]*float64{"ledger_amount": d.LedgerAmount, "bank_amount": d.BankAmount} {
-			if eq, why := agentsafe.Same(want, e.Fields[field]); !eq {
+			if eq, why := reconcile.Same(want, e.Fields[field]); !eq {
 				t.Fatalf("%s %s: %s", id, field, why)
 			}
 		}

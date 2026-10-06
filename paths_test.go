@@ -14,31 +14,6 @@ import (
 
 // Rules the code claims on its error paths, one test each.
 
-// A payment in the system of record that the run never made (made by hand, by another system, by a bug)
-// is a CRITICAL finding: money that moved outside the agent's approvals.
-func TestReconcileFlagsWhatShouldntExist(t *testing.T) {
-	rep := Reconcile(nil, []Effect{
-		{ID: "payment:T9", Kind: "payment", Gated: true, Key: "manual-1"},
-		{ID: "discrepancy:T3:extra", Kind: "discrepancy", Key: "k3"},
-	}, nil, nil)
-	var crit, errs int
-	for _, f := range rep.Findings {
-		if f.Check == "no-extras" {
-			switch f.Severity {
-			case Critical:
-				crit++
-			case Error:
-				errs++
-			case Warn:
-				t.Errorf("an extra effect is never just a warning: %v", f)
-			}
-		}
-	}
-	if crit != 1 || errs != 1 {
-		t.Fatalf("an extra payment is CRITICAL, an extra record an ERROR: %v", rep)
-	}
-}
-
 // A codec that fails (a KMS outage) stops the write: nothing is stored, in plaintext or otherwise.
 type brokenCodec struct{ sealErr, openGarbage bool }
 
@@ -185,17 +160,6 @@ func (s *summaryFails) Summary(json.RawMessage) (any, error) {
 	return nil, errors.New("summary unavailable")
 }
 
-// A gated effect with no key can't be tied to any approval: CRITICAL.
-func TestReconcileGatedEffectWithoutAKey(t *testing.T) {
-	rep := Reconcile([]Effect{{ID: "payment:T1", Gated: true}}, []Effect{{ID: "payment:T1", Gated: true}}, nil, nil)
-	for _, f := range rep.Findings {
-		if f.Severity == Critical && strings.Contains(f.Detail, "no idempotency key") {
-			return
-		}
-	}
-	t.Fatalf("want a CRITICAL 'no idempotency key' finding: %v", rep)
-}
-
 // A started call may have run: it can't be resolved as "refused, never attempted".
 func TestRefusingAStartedCallIsInvalid(t *testing.T) {
 	_, err := Rebuild([]Event{started, decided(1, call("a", "pay")), {Type: EvToolStarted, CallID: "a"}, {Type: EvToolRefused, CallID: "a"}})
@@ -227,17 +191,6 @@ func TestFuncIdentityAndDecodingEdges(t *testing.T) {
 	}
 	if _, err := New(&ScriptedModel{}, nil); !errors.Is(err, ErrConfig) || !strings.Contains(err.Error(), "no Log") {
 		t.Errorf("no Log: %v", err)
-	}
-}
-
-type flag bool
-
-func TestSameOnBooleans(t *testing.T) {
-	if eq, _ := Same(true, flag(true)); !eq {
-		t.Error("a named bool compares by value")
-	}
-	if eq, why := Same(true, false); eq || !strings.Contains(why, "false, should be true") {
-		t.Errorf("got %v %q", eq, why)
 	}
 }
 

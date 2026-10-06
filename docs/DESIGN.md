@@ -21,7 +21,7 @@ An LLM agent that calls tools is a distributed system with an unreliable, non-de
             │                                                                   │
             │ Tools: Func(...) → Validator · IdempotentTool · Gated · Timeout   │
             └──────────────────────────────────────────────────────────────────┘
- offline:  Rebuild(events) → State      Reconcile(expected, actual, events, claims)
+ offline:  Rebuild(events) → State      reconcile.Audit(expected, actual, events, claims)
            trace.Build(events) → OpenTelemetry spans
 ```
 
@@ -107,7 +107,7 @@ An adapter turns the conversation into a request and the response into a `Decisi
 
 ## Reconciliation
 
-`Reconcile` compares three independent sources: what **should** exist (computed by plain code from source data), what **does** exist (the systems of record), and what the **log** says, plus the agent's claims. Four checks: every expected effect exists exactly once with equal values (compared by type: `4200` is not `"4200"`); every gated effect has an approved key in the log; every approval took effect at most once; every effect traces to a logged result, and every claim matches the records. It's the backstop for what the runner can't see: a history forged without approvals, a payment made outside the agent, a gateway that silently charged the wrong amount.
+`reconcile.Audit` compares three independent sources: what **should** exist (computed by plain code from source data), what **does** exist (the systems of record), and what the **log** says, plus the agent's claims. Four checks: every expected effect exists exactly once with equal values (compared by type: `4200` is not `"4200"`); every gated effect has an approved key in the log; every approval took effect at most once; every effect traces to a logged result, and every claim matches the records. It's the backstop for what the runner can't see: a history forged without approvals, a payment made outside the agent, a gateway that silently charged the wrong amount.
 
 ## Decisions and the alternatives we didn't take
 

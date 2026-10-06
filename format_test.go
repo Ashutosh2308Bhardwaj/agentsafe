@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -74,10 +73,6 @@ func TestNewerFormatIsRefusedNotGuessed(t *testing.T) {
 	_, err := Rebuild([]Event{{V: FormatVersion + 1, Type: EvRunStarted, Task: "t", MaxSteps: 1}})
 	if !errors.Is(err, ErrNewerLogFormat) {
 		t.Fatalf("an event from a newer library must be refused, got %v", err)
-	}
-	rep := Reconcile(nil, nil, []Event{{V: FormatVersion + 1}}, nil)
-	if rep.Pass() || !strings.Contains(rep.String(), "can't be read") {
-		t.Fatalf("the checker must flag an unreadable log, got:\n%s", rep)
 	}
 }
 

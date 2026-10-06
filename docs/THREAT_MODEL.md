@@ -14,7 +14,7 @@ agentsafe sits between an LLM agent and the systems it acts on (payment gateways
 
 ## Trust boundaries
 
-- **The model is untrusted.** Everything it proposes is a proposal: arguments are decoded strictly, checked (`Check`), gated, and recorded before anything acts. Its text is never treated as a fact about the world (`Reconcile` compares claims with the systems of record).
+- **The model is untrusted.** Everything it proposes is a proposal: arguments are decoded strictly, checked (`Check`), gated, and recorded before anything acts. Its text is never treated as a fact about the world (`reconcile.Audit` compares claims with the systems of record).
 - **Tool input from the model is untrusted**; tool *code* is trusted: it's yours.
 - **Identities passed to `Approve` / `Reject` are trusted as authenticated**: agentsafe authorizes (`Authorizer`), your system authenticates (SSO, API keys, mTLS).
 - **Log storage** is trusted for durability, and *not* trusted for integrity: the hash chain detects changes (with an HMAC key, even by someone who can rewrite the whole file).
@@ -31,7 +31,7 @@ agentsafe sits between an LLM agent and the systems it acts on (payment gateways
 | Re-proposes a payout a human rejected | A rejection belongs to the operation: refused without asking again; invalid in the log | `TestRejectedOperationIsNotAskedAgain`, `TestPropertyCorruptionsAreRefused` | — |
 | Wrong amount or payee (grounding) | `Check` against your source before anyone is asked; refused calls are told to the model | `TestInvalidCallNeverReachesTheApprover`, `TestFuncApprovalAndCheckEndToEnd` | Only as good as your `Check` |
 | Invents an argument (`payee_account`) | Strict decoding: unknown fields are refused | `TestFuncRefusesUnknownFieldsBeforeRunning` | — |
-| Claims success that didn't happen | `Reconcile` checks claims and effects against the systems of record, independently of the log | `TestEachFailureIsCaught`, `TestReconcileFlagsWhatShouldntExist` | Reconcile must be run, with real system-of-record adapters |
+| Claims success that didn't happen | `reconcile.Audit` checks claims and effects against the systems of record, independently of the log | `TestEachFailureIsCaught`, `TestReconcileFlagsWhatShouldntExist` | Reconcile must be run, with real system-of-record adapters |
 | Answer cut off (max tokens), or declined by safety classifiers | Mapped to `length` / `refusal`, never to a finished answer; unknown stop reasons are errors | `TestStopReasons` (Claude), `TestFinishReasons` (Gemini) | — |
 
 ### T2. A manipulated model (prompt injection, hostile content in tool results)
@@ -60,7 +60,7 @@ agentsafe does not detect injection: it bounds what an injected model can do. An
 | Edits, inserts, deletes or reorders events (a forged approval) | Hash chain verified on every read; a tampered run is refused, never resumed | `TestTamperingIsDetected`, `TestEveryLineLinksToTheOneBefore` | — |
 | Rewrites the whole file with every link recomputed | HMAC chain (`FileLog.Key`), key kept off the log's host | `TestForgedApprovalIsRefusedWithAKey`, `TestReadingAKeyedLogWithoutTheKeyFails` | **Without a key, undetectable** |
 | Edits or truncates the last event | Anchor `Head()` somewhere they can't write (your database, the approval record) | `TestWithoutAKeyAForgedTailNeedsAnAnchoredHead` | Only if you anchor it |
-| Writes a history that never asks for approval | `Reconcile`: every gated effect needs an approved key in the log; the runner always gates | `TestEachFailureIsCaught`, `TestReconcileGatedEffectWithoutAKey` | **`Rebuild` alone accepts it**: the state machine can't know which tools are gated. Use a key, and reconcile |
+| Writes a history that never asks for approval | `reconcile.Audit`: every gated effect needs an approved key in the log; the runner always gates | `TestEachFailureIsCaught`, `TestReconcileGatedEffectWithoutAKey` | **`Rebuild` alone accepts it**: the state machine can't know which tools are gated. Use a key, and reconcile |
 | Moves a sealed payload onto another line | Each payload is bound to its position (seq, type, call id) | `TestSealedPayloadCantBeMovedToAnotherEvent` | — |
 | Damages bytes in the middle | Refused as corrupt, never skipped | `TestDamageInTheMiddleIsRefused`, `FuzzReadLog` | — |
 

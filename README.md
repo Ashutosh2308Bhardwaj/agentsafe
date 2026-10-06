@@ -116,7 +116,7 @@ r, err := agentsafe.New(model, &agentsafe.FileLog{Path: "run.jsonl"}, agentsafe.
 	agentsafe.WithAuthorizer(agentsafe.All(agentsafe.AllowList("ops@company"), agentsafe.NotRequester()))) // who may decide
 st, err := r.Start(ctx, system, task)     // or r.Continue(ctx) after a crash, in any process
 r.Approve(ctx, key, "ops@company")         // a gated call waits durably until someone ALLOWED decides
-rep := agentsafe.Reconcile(expected, actual, events, claims)   // did it do what it claimed?
+rep := reconcile.Audit(expected, actual, events, claims)   // did it do what it claimed?
 ```
 
 | primitive | what it does | file |
@@ -132,7 +132,7 @@ rep := agentsafe.Reconcile(expected, actual, events, claims)   // did it do what
 | **Traces from the log** | OpenTelemetry GenAI-convention spans (`invoke_agent`, `chat`, `execute_tool`) *derived* from the log, so the trace can't disagree with it, and the same log gives the same trace. OTLP/JSON export. | `trace/`, `cmd/trace` |
 | **Timeouts and panics** | A call that times out, panics, or returns `ErrOutcomeUnknown` is *in doubt*, never *failed*: a timed-out payout may have been charged. Idempotent tools are retried with the same key (the gateway dedupes); still unknown → `ErrInDoubt`, nothing logged, and `Continue` resolves it later. Other tools: the model is told the outcome is unknown. A panicking tool never takes the process down. | `exec.go` |
 | **Sealed at rest** | Arguments, results, prompts and approval summaries are encrypted in the log (AES-256-GCM, key rotation; or your own `Codec`, e.g. a KMS), each bound to its line. Who approved what, keys, and the hash chain stay readable for audit; resume decrypts, so a crashed run continues with the real values. Deleting a key erases its runs. Console output and exported traces are masked separately (`Runner.Redact`, `Trace.Redact`), so nothing sensitive reaches a log aggregator or tracing vendor. | `seal.go`, `redact.go` |
-| **Reconciliation** | Compares **what should exist** (computed from source data by plain code), **what the log says**, and **what the systems of record hold**: field by field, every payment tied to exactly one approval. | Values are compared by type, exactly: `4200` ≠ `"4200"`, a missing field ≠ null, `Decimal("4200.50")` = `4200.5`, float drift is reported, never tolerated. | `check.go`, `compare.go` |
+| **Reconciliation** | Compares **what should exist** (computed from source data by plain code), **what the log says**, and **what the systems of record hold**: field by field, every payment tied to exactly one approval. | Values are compared by type, exactly: `4200` ≠ `"4200"`, a missing field ≠ null, `Decimal("4200.50")` = `4200.5`, float drift is reported, never tolerated. | `reconcile/` |
 
 ## What's proven
 

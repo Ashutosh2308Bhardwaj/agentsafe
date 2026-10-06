@@ -1,9 +1,17 @@
-package agentsafe
+// Package reconcile audits a finished agentsafe run against the systems it acted on: what should exist
+// (computed by your code from source data), what does exist (your ledger, your payment gateway), what the
+// run's log says, and what the agent claimed. A trace is the agent's own account; this is the independent one.
+//
+//	rep := reconcile.Audit(expected, actual, events, claims)
+//	if !rep.Pass() { alert(rep.String()) } // CRITICAL: money moved without approval, or twice
+package reconcile
 
 import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
 
 // Reconciliation: prove the agent did what it claimed, against the systems it acted on.
@@ -64,14 +72,14 @@ type Report struct {
 // Pass is true only if nothing at all was found.
 func (r Report) Pass() bool { return len(r.Findings) == 0 }
 
-// Reconcile runs the four checks.
+// Audit runs the four checks.
 //
 //  1. complete + exact: every expected effect exists exactly once with every field equal; nothing extra
 //  2. authorised: every gated effect (money) has an APPROVED approval in the log for its key
 //  3. once per approval: every approved key has exactly one actual effect
 //  4. provenance + claims: every actual effect traces to a logged tool result with its key, and every
 //     claim the agent made matches the records
-func Reconcile(expected, actual []Effect, events []Event, claims []Claim) Report {
+func Audit(expected, actual []Effect, events []agentsafe.Event, claims []Claim) Report {
 	r := &reconciler{rep: Report{Expected: len(expected), Actual: len(actual)}}
 	l := r.readLog(events)
 	r.rep.ApprovedKeys = len(l.approved)
@@ -97,20 +105,20 @@ type logFacts struct {
 
 // readLog upgrades the events and extracts the approvals and results. An unreadable log is itself a finding:
 // nothing in it can be trusted.
-func (r *reconciler) readLog(events []Event) logFacts {
+func (r *reconciler) readLog(events []agentsafe.Event) logFacts {
 	l := logFacts{approved: map[string]bool{}, rejected: map[string]bool{}, resulted: map[string]bool{}}
-	events, err := UpgradeAll(events)
+	events, err := agentsafe.UpgradeAll(events)
 	if err != nil {
 		r.add(Critical, "log", "the run's log can't be read, so nothing in it can be trusted: %v", err)
 		return l
 	}
 	for _, ev := range events {
 		switch {
-		case ev.Type == EvApprovalDecided && ev.Decision == "approved":
+		case ev.Type == agentsafe.EvApprovalDecided && ev.Decision == "approved":
 			l.approved[ev.Key] = true
-		case ev.Type == EvApprovalDecided && ev.Decision == "rejected":
+		case ev.Type == agentsafe.EvApprovalDecided && ev.Decision == "rejected":
 			l.rejected[ev.Key] = true
-		case ev.Type == EvToolResult && ev.Key != "":
+		case ev.Type == agentsafe.EvToolResult && ev.Key != "":
 			l.resulted[ev.Key] = true
 		}
 	}

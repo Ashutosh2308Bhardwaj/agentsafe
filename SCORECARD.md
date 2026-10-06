@@ -22,7 +22,7 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [x] Approver authorization hook (who may approve what): `authz.go`, `authz_test.go`; refused attempts logged as `approval_denied`; safe default refuses
 - [x] Redaction hook for sensitive tool arguments/results before they're logged. At rest: sealed log (`seal.go`: AES-256-GCM, rotation, crypto-shredding; resume still sees real values). Leaving the process: `Runner.Redact` for console output, `Trace.Redact` before export (`redact.go`)
 - [x] Per-tool timeouts and panic recovery: `exec.go`, `exec_test.go`; unknown outcome ≠ failure (idempotent: same-key retry, then `ErrInDoubt` with nothing logged; others: model told it's unknown); panics recovered, never auto-retried
-- [x] Typed field comparison in `Reconcile` (no `"4200" == 4200`): `compare.go` `Same` + `Decimal`; missing ≠ null; float drift reported; claims typed too
+- [x] Typed field comparison in `reconcile.Audit` (no `"4200" == 4200`): `compare.go` `Same` + `Decimal`; missing ≠ null; float drift reported; claims typed too
 
 ## Quality gates (5/7)
 - [x] golangci-lint (strict config) clean

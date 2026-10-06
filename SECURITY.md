@@ -18,7 +18,7 @@ Anything that breaks a guarantee in [README.md](README.md#whats-proven), for exa
 - **Approval bypass:** a gated call that runs without an approval, with a rejected approval, or approved by someone the `Authorizer` should refuse.
 - **History forgery:** a change to a log that `Read` accepts without `ErrTampered` (with a key, or anywhere but the last line without one: see [FORMAT.md](FORMAT.md) and `chain.go` for the documented limits).
 - **Sealed data exposure:** content of a sealed log readable without its key, or a sealed payload that opens on the wrong line.
-- **Wrong reconciliation:** `Reconcile` passing a run where money moved without authorization, moved twice, or doesn't match what should exist.
+- **Wrong reconciliation:** `reconcile.Audit` passing a run where money moved without authorization, moved twice, or doesn't match what should exist.
 - **Resource exhaustion from model input:** arguments or responses a model can send that make agentsafe hang, crash, or allocate without bound.
 - **Fencing failure:** two runners both writing to one run in a supported storage backend.
 

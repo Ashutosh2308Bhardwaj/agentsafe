@@ -9,12 +9,13 @@ import (
 	"strconv"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	"github.com/Ashutosh2308Bhardwaj/agentsafe/reconcile"
 )
 
 // expectedFromFiles computes what SHOULD exist, by plain code, from the two source files: every discrepancy,
 // and one re-issue payment for every payout missing from the bank. It shares nothing with the agent, the
 // tools' Validate, or ground_truth.json: an independent derivation is the point.
-func expectedFromFiles(dir string) ([]agentsafe.Effect, error) {
+func expectedFromFiles(dir string) ([]reconcile.Effect, error) {
 	ledger, err := readCSV(filepath.Join(dir, "ledger.csv"))
 	if err != nil {
 		return nil, err
@@ -39,10 +40,10 @@ func expectedFromFiles(dir string) ([]agentsafe.Effect, error) {
 	}
 	sort.Strings(sorted)
 
-	var out []agentsafe.Effect
+	var out []reconcile.Effect
 	// Amounts are compared as the source files state them: exact decimals, never through a float.
 	disc := func(txn, kind string, l, b []map[string]string) {
-		out = append(out, agentsafe.Effect{ID: "discrepancy:" + txn + ":" + kind, Kind: "discrepancy",
+		out = append(out, reconcile.Effect{ID: "discrepancy:" + txn + ":" + kind, Kind: "discrepancy",
 			Fields: map[string]any{"ledger_amount": decimalOf(l), "bank_amount": decimalOf(b)}})
 	}
 	for _, txn := range sorted {
@@ -51,7 +52,7 @@ func expectedFromFiles(dir string) ([]agentsafe.Effect, error) {
 		switch {
 		case len(l) > 0 && len(b) == 0:
 			disc(txn, "missing_in_bank", l, nil)
-			out = append(out, agentsafe.Effect{ID: "payment:reissue:" + txn, Kind: "payment", Gated: true,
+			out = append(out, reconcile.Effect{ID: "payment:reissue:" + txn, Kind: "payment", Gated: true,
 				Fields: map[string]any{"payee": l[0]["payee"], "amount_inr": decimalOf(l)}})
 		case len(l) == 0 && len(b) > 0:
 			disc(txn, "missing_in_ledger", nil, b)
@@ -70,14 +71,14 @@ func expectedFromFiles(dir string) ([]agentsafe.Effect, error) {
 }
 
 // actualFromRecords reads what DOES exist: the ledger file and the gateway's payments.
-func actualFromRecords(ledger *Ledger, gw *Gateway) ([]agentsafe.Effect, error) {
+func actualFromRecords(ledger *Ledger, gw *Gateway) ([]reconcile.Effect, error) {
 	rows, err := ledger.Rows()
 	if err != nil {
 		return nil, err
 	}
-	var out []agentsafe.Effect
+	var out []reconcile.Effect
 	for _, r := range rows {
-		out = append(out, agentsafe.Effect{ID: "discrepancy:" + r.TxnID + ":" + r.Kind, Kind: "discrepancy", Key: r.Key,
+		out = append(out, reconcile.Effect{ID: "discrepancy:" + r.TxnID + ":" + r.Kind, Kind: "discrepancy", Key: r.Key,
 			Fields: map[string]any{"ledger_amount": r.LedgerAmount, "bank_amount": r.BankAmount}}) // *float64; nil = null
 	}
 	pays, err := gw.Payments()
@@ -85,21 +86,21 @@ func actualFromRecords(ledger *Ledger, gw *Gateway) ([]agentsafe.Effect, error) 
 		return nil, err
 	}
 	for _, p := range pays {
-		out = append(out, agentsafe.Effect{ID: "payment:reissue:" + p.Ref, Kind: "payment", Gated: true, Key: p.Key,
+		out = append(out, reconcile.Effect{ID: "payment:reissue:" + p.Ref, Kind: "payment", Gated: true, Key: p.Key,
 			Fields: map[string]any{"payee": p.Payee, "amount_inr": p.Amount}})
 	}
 	return out, nil
 }
 
-// reconcile runs the checker for one run.
-func reconcile(dataDir string, ledger *Ledger, gw *Gateway, events []agentsafe.Event, st agentsafe.State) (agentsafe.Report, error) {
+// audit runs the checker for one run.
+func audit(dataDir string, ledger *Ledger, gw *Gateway, events []agentsafe.Event, st agentsafe.State) (reconcile.Report, error) {
 	expected, err := expectedFromFiles(dataDir)
 	if err != nil {
-		return agentsafe.Report{}, err
+		return reconcile.Report{}, err
 	}
 	actual, err := actualFromRecords(ledger, gw)
 	if err != nil {
-		return agentsafe.Report{}, err
+		return reconcile.Report{}, err
 	}
 	rows := 0
 	for _, a := range actual {
@@ -112,15 +113,15 @@ func reconcile(dataDir string, ledger *Ledger, gw *Gateway, events []agentsafe.E
 		n, _ := strconv.Atoi(m[1])
 		claimed = n
 	}
-	claims := []agentsafe.Claim{{Name: "TOTAL_DISCREPANCIES", Claimed: claimed, Actual: rows,
+	claims := []reconcile.Claim{{Name: "TOTAL_DISCREPANCIES", Claimed: claimed, Actual: rows,
 		Required: st.Status == agentsafe.StatusFinished}}
-	return agentsafe.Reconcile(expected, actual, events, claims), nil
+	return reconcile.Audit(expected, actual, events, claims), nil
 }
 
 func printReconciliation(dataDir string, ledger *Ledger, gw *Gateway, log agentsafe.Log, st agentsafe.State) {
 	events, err := log.Read(context.Background())
 	must(err)
-	rep, err := reconcile(dataDir, ledger, gw, events, st)
+	rep, err := audit(dataDir, ledger, gw, events, st)
 	must(err)
 	fmt.Print("\n" + rep.String())
 }
