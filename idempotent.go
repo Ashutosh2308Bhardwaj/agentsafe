@@ -1,11 +1,15 @@
 package agentsafe
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
 )
 
 // IdempotentTool is a tool with a side effect that must happen at most once per operation.
@@ -36,12 +40,91 @@ func Canonical(v any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var generic any // round-trip through `any`: maps marshal with sorted keys, numbers become float64
-	if err := json.Unmarshal(b, &generic); err != nil {
+	d := json.NewDecoder(bytes.NewReader(b)) // round-trip through `any`: maps marshal with sorted keys
+	d.UseNumber()
+	var generic any
+	if err := d.Decode(&generic); err != nil {
+		return "", err
+	}
+	if generic, err = exactNumbers(generic); err != nil {
 		return "", err
 	}
 	out, err := json.Marshal(generic)
 	return string(out), err
+}
+
+// exactNumbers makes every number canonical without changing its value. A number that round-trips through
+// float64 keeps the form Canonical has always used, so existing keys stay the same; one that doesn't (an
+// integer above 2^53, say) keeps its exact decimal text: rounded, two different invoice numbers could share
+// one key, and the second payout would be replayed instead of made. Found by FuzzCanonicalKeepsNumbersExact.
+func exactNumbers(v any) (any, error) {
+	var err error
+	switch t := v.(type) {
+	case json.Number:
+		return canonicalNumber(t)
+	case map[string]any:
+		for k, x := range t {
+			if t[k], err = exactNumbers(x); err != nil {
+				return nil, err
+			}
+		}
+	case []any:
+		for i, x := range t {
+			if t[i], err = exactNumbers(x); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return v, nil
+}
+
+// maxExponent bounds a number's exponent: computing 1e-100000000 exactly would take gigabytes, and a model
+// can send any literal. No amount or identifier needs more than float64's range.
+const maxExponent = 400
+
+func canonicalNumber(n json.Number) (any, error) {
+	s := string(n)
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		if exp, err := strconv.Atoi(s[i+1:]); err != nil || exp > maxExponent || exp < -maxExponent {
+			return nil, fmt.Errorf("number %.40s is out of range", s)
+		}
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil, fmt.Errorf("number %.40s: %w", s, err)
+	}
+	exact, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return nil, fmt.Errorf("number %.40s isn't a decimal", s)
+	}
+	// Two different numbers collide only if they round to one float64, and then at least one of them differs
+	// from the shortest decimal of that float64 (what json writes for it). So: equal to it -> the float64 form
+	// keys have always used; different -> the exact text.
+	shortest, _ := new(big.Rat).SetString(strconv.FormatFloat(f, 'g', -1, 64))
+	if exact.Cmp(shortest) == 0 {
+		return f, nil
+	}
+	return json.Number(decimalText(exact)), nil
+}
+
+// decimalText writes r (a decimal: its denominator is 2^a*5^b) with exactly the digits it needs.
+func decimalText(r *big.Rat) string {
+	places, den := 0, new(big.Int).Set(r.Denom())
+	two, five, zero, m := big.NewInt(2), big.NewInt(5), big.NewInt(0), new(big.Int)
+	for twos, fives := 0, 0; den.Cmp(big.NewInt(1)) > 0; {
+		switch {
+		case m.Mod(den, two).Cmp(zero) == 0:
+			den.Div(den, two)
+			twos++
+		case m.Mod(den, five).Cmp(zero) == 0:
+			den.Div(den, five)
+			fives++
+		default:
+			return r.RatString() // not a decimal (can't happen for a parsed literal)
+		}
+		places = max(twos, fives)
+	}
+	return r.FloatString(places)
 }
 
 func hash(parts ...string) string {

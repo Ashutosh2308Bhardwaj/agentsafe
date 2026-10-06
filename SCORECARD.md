@@ -2,13 +2,13 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 24 / 35 → 69 / 100** (after step 4.6, quickstart; phase 4 done)
+**Current: 25 / 35 → 71 / 100** (after step 5.1, fuzzing)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71
 
-## Correctness (2/5)
+## Correctness (3/5)
 - [x] `go test -race` clean on every package
-- [ ] Fuzz tests: log reader, `Rebuild`, `Canonical`
+- [x] Fuzz tests: log reader, `Rebuild`, `Canonical`: 7 targets (`fuzz_test.go`: log reading + torn tails, Rebuild, Canonical exactness and stability, sealed payloads, Same, wrapped tools' arguments), each fuzzed 30s per CI run; found a real key collision in `Canonical` (numbers above 2^53), fixed without changing any other key
 - [ ] Property-based tests on the state machine (random event sequences: valid histories rebuild, invalid ones are rejected)
 - [ ] Coverage ≥ 90% of the core package (baseline 71.8%, now 78.2%)
 - [x] Crash harness (`scripts/money_sweep.sh`: kill -9 at 8 points, reconciled) exits non-zero on failure, wired into CI

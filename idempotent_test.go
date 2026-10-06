@@ -127,3 +127,40 @@ func TestCanonicalNormalises(t *testing.T) {
 		t.Fatalf("%s != %s", a, b)
 	}
 }
+
+// Two different invoice numbers above 2^53 rounded to one float64, so they shared an idempotency key and the
+// second payout would have been replayed instead of made. Found by FuzzCanonicalKeepsNumbersExact.
+func TestLargeNumbersDontShareAKey(t *testing.T) {
+	a, _ := Canonical(json.RawMessage(`{"invoice":12345678901234567}`))
+	b, _ := Canonical(json.RawMessage(`{"invoice":12345678901234568}`))
+	if a == b {
+		t.Fatalf("two invoices, one key: %s", a)
+	}
+	if a != `{"invoice":12345678901234567}` {
+		t.Fatalf("the exact number must be kept: %s", a)
+	}
+	// 1e-500 underflows to 0 without an error from ParseFloat; computed exactly, a model could make every key
+	// cost a huge allocation (math/big itself only refuses exponents near 10^7).
+	for _, n := range []string{"1e-500", "1e500", "2E+401"} {
+		if _, err := Canonical(json.RawMessage(`{"x":` + n + `}`)); err == nil || !strings.Contains(err.Error(), "out of range") {
+			t.Fatalf("%s must be refused as out of range, got %v", n, err)
+		}
+	}
+}
+
+// Keys already in logs must not change: every number float64 holds exactly canonicalizes exactly as before.
+func TestCanonicalUnchangedForExactNumbers(t *testing.T) {
+	old := func(raw string) string {
+		var g any
+		_ = json.Unmarshal([]byte(raw), &g)
+		b, _ := json.Marshal(g)
+		return string(b)
+	}
+	for _, raw := range []string{`{"amount":4200.5,"n":1}`, `{"a":[1,2.0,-0,1e3,0.1,1e21,123456789012345]}`,
+		`{"ref":"T1007","amount":11000}`, `{"x":9007199254740992}`, `[0.30000000000000004,1.5e-7,-2.25]`, `{"z":true,"y":null}`} {
+		got, err := Canonical(json.RawMessage(raw))
+		if err != nil || got != old(raw) {
+			t.Errorf("Canonical(%s) = %s, was %s (err %v)", raw, got, old(raw), err)
+		}
+	}
+}

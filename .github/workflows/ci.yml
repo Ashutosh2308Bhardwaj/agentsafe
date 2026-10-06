@@ -96,6 +96,21 @@ jobs:
       - name: govulncheck
         working-directory: ${{ matrix.module }}
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  fuzz:
+    # Each target searches for 30s beyond its seeds; a failure is saved under testdata/fuzz and fails the job.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FuzzReadLog, FuzzRebuild, FuzzCanonicalKeepsNumbersExact, FuzzCanonicalIsStable, FuzzOpenSealed, FuzzSame, FuzzFuncArgs]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - run: go test -run '^$' -fuzz='^${{ matrix.target }}$' -fuzztime=30s .
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: "fuzz-${{ matrix.target }}", path: testdata/fuzz }
   crash-harness:
     runs-on: ubuntu-latest
     steps:

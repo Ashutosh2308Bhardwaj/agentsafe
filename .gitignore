@@ -2,3 +2,5 @@ examples/reconcile/out/
 coverage.out
 *.test
 /tmp/
+# written when you run the quickstart
+examples/quickstart/payout-run.jsonl
