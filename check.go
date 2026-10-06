@@ -72,69 +72,92 @@ func (r Report) Pass() bool { return len(r.Findings) == 0 }
 //  4. provenance + claims: every actual effect traces to a logged tool result with its key, and every
 //     claim the agent made matches the records
 func Reconcile(expected, actual []Effect, events []Event, claims []Claim) Report {
-	rep := Report{Expected: len(expected), Actual: len(actual)}
-	add := func(s Severity, check, f string, a ...any) {
-		rep.Findings = append(rep.Findings, Finding{s, check, fmt.Sprintf(f, a...)})
-	}
-	if up, err := UpgradeAll(events); err != nil {
-		add(Critical, "log", "the run's log can't be read, so nothing in it can be trusted: %v", err)
-		events = nil
-	} else {
-		events = up
-	}
+	r := &reconciler{rep: Report{Expected: len(expected), Actual: len(actual)}}
+	l := r.readLog(events)
+	r.rep.ApprovedKeys = len(l.approved)
+	r.completeAndExact(expected, actual)
+	perKey := r.authorised(actual, l)
+	r.oncePerApproval(l, perKey)
+	r.provenance(actual, l)
+	r.claims(claims)
+	sort.SliceStable(r.rep.Findings, func(i, j int) bool { return rank(r.rep.Findings[i].Severity) < rank(r.rep.Findings[j].Severity) })
+	return r.rep
+}
 
+type reconciler struct{ rep Report }
+
+func (r *reconciler) add(s Severity, check, f string, a ...any) {
+	r.rep.Findings = append(r.rep.Findings, Finding{s, check, fmt.Sprintf(f, a...)})
+}
+
+// logFacts is what the checks need from the run's log.
+type logFacts struct {
+	approved, rejected, resulted map[string]bool // by operation key; resulted = has a logged tool result
+}
+
+// readLog upgrades the events and extracts the approvals and results. An unreadable log is itself a finding:
+// nothing in it can be trusted.
+func (r *reconciler) readLog(events []Event) logFacts {
+	l := logFacts{approved: map[string]bool{}, rejected: map[string]bool{}, resulted: map[string]bool{}}
+	events, err := UpgradeAll(events)
+	if err != nil {
+		r.add(Critical, "log", "the run's log can't be read, so nothing in it can be trusted: %v", err)
+		return l
+	}
+	for _, ev := range events {
+		switch {
+		case ev.Type == EvApprovalDecided && ev.Decision == "approved":
+			l.approved[ev.Key] = true
+		case ev.Type == EvApprovalDecided && ev.Decision == "rejected":
+			l.rejected[ev.Key] = true
+		case ev.Type == EvToolResult && ev.Key != "":
+			l.resulted[ev.Key] = true
+		}
+	}
+	return l
+}
+
+// severity is Critical for money (gated effects), Error otherwise.
+func severity(gated bool) Severity {
+	if gated {
+		return Critical
+	}
+	return Error
+}
+
+// 1. complete + exact: every expected effect exists exactly once with every field equal; nothing extra.
+func (r *reconciler) completeAndExact(expected, actual []Effect) {
 	byID := map[string][]Effect{}
 	for _, e := range actual {
 		byID[e.ID] = append(byID[e.ID], e)
 	}
-
-	// 1. complete + exact
 	want := map[string]bool{}
 	for _, x := range expected {
 		want[x.ID] = true
 		got := byID[x.ID]
 		switch {
 		case len(got) == 0:
-			add(Error, "complete", "%s should exist and doesn't", x.ID)
+			r.add(Error, "complete", "%s should exist and doesn't", x.ID)
 		case len(got) > 1:
-			sev := Error
-			if x.Gated {
-				sev = Critical
-			}
-			add(sev, "exactly-once", "%s exists %d times", x.ID, len(got))
+			r.add(severity(x.Gated), "exactly-once", "%s exists %d times", x.ID, len(got))
 		default:
 			if diff := diffFields(x.Fields, got[0].Fields); diff != "" {
-				add(Error, "exact", "%s has wrong values: %s", x.ID, diff)
+				r.add(Error, "exact", "%s has wrong values: %s", x.ID, diff)
 			} else {
-				rep.Matched++
+				r.rep.Matched++
 			}
 		}
 	}
 	for _, e := range actual {
 		if !want[e.ID] {
-			sev := Error
-			if e.Gated {
-				sev = Critical
-			}
-			add(sev, "no-extras", "%s exists but shouldn't", e.ID)
+			r.add(severity(e.Gated), "no-extras", "%s exists but shouldn't", e.ID)
 		}
 	}
+}
 
-	// From the log: approvals, and every key that has a logged executed result.
-	approved, rejected, resulted := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	for _, ev := range events {
-		switch {
-		case ev.Type == EvApprovalDecided && ev.Decision == "approved":
-			approved[ev.Key] = true
-		case ev.Type == EvApprovalDecided && ev.Decision == "rejected":
-			rejected[ev.Key] = true
-		case ev.Type == EvToolResult && ev.Key != "":
-			resulted[ev.Key] = true
-		}
-	}
-	rep.ApprovedKeys = len(approved)
-
-	// 2. authorised, and 3. once per approval
+// 2. authorised: every gated effect (money) has an APPROVED approval in the log for its key. Returns the
+// number of gated effects per key, for check 3.
+func (r *reconciler) authorised(actual []Effect, l logFacts) map[string]int {
 	perKey := map[string]int{}
 	for _, e := range actual {
 		if !e.Gated {
@@ -143,43 +166,57 @@ func Reconcile(expected, actual []Effect, events []Event, claims []Claim) Report
 		perKey[e.Key]++
 		switch {
 		case e.Key == "":
-			add(Critical, "authorised", "%s moved money with no idempotency key: it can't be tied to any approval", e.ID)
-		case rejected[e.Key]:
-			add(Critical, "authorised", "%s exists although its approval (%s) was REJECTED", e.ID, e.Key)
-		case !approved[e.Key]:
-			add(Critical, "authorised", "%s exists with no approval in the log for key %s", e.ID, e.Key)
+			r.add(Critical, "authorised", "%s moved money with no idempotency key: it can't be tied to any approval", e.ID)
+		case l.rejected[e.Key]:
+			r.add(Critical, "authorised", "%s exists although its approval (%s) was REJECTED", e.ID, e.Key)
+		case !l.approved[e.Key]:
+			r.add(Critical, "authorised", "%s exists with no approval in the log for key %s", e.ID, e.Key)
 		default:
-			rep.AuthorizedMoney++
+			r.rep.AuthorizedMoney++
 		}
 	}
-	for k := range approved {
+	return perKey
+}
+
+// 3. once per approval: every approved key has exactly one actual effect. Keys are visited in order, so the
+// same run always gives the same report.
+func (r *reconciler) oncePerApproval(l logFacts, perKey map[string]int) {
+	keys := make([]string, 0, len(l.approved))
+	for k := range l.approved {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
 		switch n := perKey[k]; {
 		case n == 0:
-			add(Error, "once-per-approval", "approved operation %s has no effect in the system of record", k)
+			r.add(Error, "once-per-approval", "approved operation %s has no effect in the system of record", k)
 		case n > 1:
-			add(Critical, "once-per-approval", "approved operation %s took effect %d times", k, n)
+			r.add(Critical, "once-per-approval", "approved operation %s took effect %d times", k, n)
 		}
 	}
+}
 
-	// 4. provenance + claims
+// 4a. provenance: every actual effect traces to a logged tool result with its key.
+func (r *reconciler) provenance(actual []Effect, l logFacts) {
 	for _, e := range actual {
-		if e.Key == "" || !resulted[e.Key] {
-			add(Warn, "provenance", "%s has no logged tool result (key %q): written outside the run, or its result was never confirmed", e.ID, e.Key)
+		if e.Key == "" || !l.resulted[e.Key] {
+			r.add(Warn, "provenance", "%s has no logged tool result (key %q): written outside the run, or its result was never confirmed", e.ID, e.Key)
 		}
 	}
+}
+
+// 4b. claims: every claim the agent made matches the records, compared by type.
+func (r *reconciler) claims(claims []Claim) {
 	for _, c := range claims {
 		switch {
 		case c.Claimed == nil && c.Required:
-			add(Warn, "claims", "the agent made no %s claim", c.Name)
+			r.add(Warn, "claims", "the agent made no %s claim", c.Name)
 		case c.Claimed != nil:
 			if eq, why := Same(c.Actual, c.Claimed); !eq {
-				add(Warn, "claims", "the agent claimed %s = %v; the records say %v (%s)", c.Name, c.Claimed, c.Actual, why)
+				r.add(Warn, "claims", "the agent claimed %s = %v; the records say %v (%s)", c.Name, c.Claimed, c.Actual, why)
 			}
 		}
 	}
-
-	sort.SliceStable(rep.Findings, func(i, j int) bool { return rank(rep.Findings[i].Severity) < rank(rep.Findings[j].Severity) })
-	return rep
 }
 
 // String renders the report for a terminal.

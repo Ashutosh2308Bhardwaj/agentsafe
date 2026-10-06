@@ -319,41 +319,46 @@ func typeSchema(t reflect.Type, seen map[reflect.Type]bool) (map[string]any, err
 		}
 		return map[string]any{"type": "object", "additionalProperties": v}, nil
 	case reflect.Struct:
-		if seen[t] {
-			return nil, fmt.Errorf("recursive type %s can't be a tool input", t)
-		}
-		seen[t] = true
-		defer delete(seen, t)
-		props, required := map[string]any{}, []string{}
-		for i := range t.NumField() {
-			sf := t.Field(i)
-			if !sf.IsExported() || sf.Anonymous {
-				continue
-			}
-			name, opts, _ := strings.Cut(sf.Tag.Get("json"), ",")
-			if name == "-" {
-				continue
-			}
-			if name == "" {
-				name = sf.Name
-			}
-			p, err := typeSchema(sf.Type, seen)
-			if err != nil {
-				return nil, err
-			}
-			if d := sf.Tag.Get("desc"); d != "" {
-				p["description"] = d
-			}
-			if e := sf.Tag.Get("enum"); e != "" {
-				p["enum"] = strings.Split(e, ",")
-			}
-			props[name] = p
-			if sf.Type.Kind() != reflect.Pointer && !strings.Contains(opts, "omitempty") {
-				required = append(required, name)
-			}
-		}
-		return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}, nil
+		return structSchema(t, seen)
 	default: // channels, funcs, interfaces, complex numbers: nothing a model can send as JSON
 		return nil, fmt.Errorf("type %s can't be a tool input", t)
 	}
+}
+
+// structSchema is an object schema: exported fields by their JSON names, required unless optional.
+func structSchema(t reflect.Type, seen map[reflect.Type]bool) (map[string]any, error) {
+	if seen[t] {
+		return nil, fmt.Errorf("recursive type %s can't be a tool input", t)
+	}
+	seen[t] = true
+	defer delete(seen, t)
+	props, required := map[string]any{}, []string{}
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() || sf.Anonymous {
+			continue
+		}
+		name, opts, _ := strings.Cut(sf.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = sf.Name
+		}
+		p, err := typeSchema(sf.Type, seen)
+		if err != nil {
+			return nil, err
+		}
+		if d := sf.Tag.Get("desc"); d != "" {
+			p["description"] = d
+		}
+		if e := sf.Tag.Get("enum"); e != "" {
+			p["enum"] = strings.Split(e, ",")
+		}
+		props[name] = p
+		if sf.Type.Kind() != reflect.Pointer && !strings.Contains(opts, "omitempty") {
+			required = append(required, name)
+		}
+	}
+	return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}, nil
 }

@@ -78,14 +78,37 @@ func BuildTrace(events []Event, agent string) (*Trace, error) {
 	if len(events) == 0 || events[0].Type != EvRunStarted {
 		return nil, fmt.Errorf("log does not start with run_started")
 	}
+	b := newTraceBuilder(events, agent, st)
+	for _, e := range events {
+		if err := b.add(e); err != nil {
+			return nil, err
+		}
+		b.prev = e.Time
+	}
+	return b.finish(), nil
+}
+
+// traceBuilder turns events into spans: the run (root), one per model call, one per tool call, one per approval.
+type traceBuilder struct {
+	first           Event
+	traceID, rootID string
+	root            Span
+	spans           []Span
+	open            map[string]int // call id (or "approval:"+call id) -> index in spans
+	step            int
+	prev            time.Time // the event before the current one: a chat span starts there
+}
+
+func newTraceBuilder(events []Event, agent string, st State) *traceBuilder {
 	first := events[0]
-	traceID := id(32, "trace", first.Time.Format(time.RFC3339Nano), first.Task)
-	rootID := id(16, traceID, "root")
-	root := Span{TraceID: traceID, SpanID: rootID, Name: "invoke_agent " + agent, Kind: kindInternal,
+	b := &traceBuilder{first: first, open: map[string]int{}, prev: first.Time}
+	b.traceID = id(32, "trace", first.Time.Format(time.RFC3339Nano), first.Task)
+	b.rootID = id(16, b.traceID, "root")
+	b.root = Span{TraceID: b.traceID, SpanID: b.rootID, Name: "invoke_agent " + agent, Kind: kindInternal,
 		Start: first.Time, End: events[len(events)-1].Time, Attrs: []Attr{
 			{"gen_ai.operation.name", "invoke_agent"},
 			{"gen_ai.agent.name", agent},
-			{"gen_ai.conversation.id", traceID},
+			{"gen_ai.conversation.id", b.traceID},
 			{"gen_ai.provider.name", first.Provider},
 			{"gen_ai.request.model", first.Model},
 			{"agentsafe.run.status", string(st.Status)},
@@ -96,116 +119,136 @@ func BuildTrace(events []Event, agent string) (*Trace, error) {
 		}}
 	switch st.Status {
 	case StatusFinished:
-		root.Status = statusOK
+		b.root.Status = statusOK
 	case StatusPaused, StatusAwaitingApproval:
-		root.Open, root.StatusMsg = true, "run is "+string(st.Status)
+		b.root.Open, b.root.StatusMsg = true, "run is "+string(st.Status)
 	default:
-		root.Open, root.StatusMsg = true, "run has no terminal event: in progress or crashed"
+		b.root.Open, b.root.StatusMsg = true, "run has no terminal event: in progress or crashed"
 	}
+	return b
+}
 
-	var spans []Span
-	open := map[string]int{} // call id (or "approval:"+call id) -> index in spans
-	step := 0
-	prev := first.Time
-	child := func(seq int, name string, kind int, start time.Time, attrs ...Attr) int {
-		spans = append(spans, Span{TraceID: traceID, SpanID: id(16, traceID, strconv.Itoa(seq), name),
-			ParentID: rootID, Name: name, Kind: kind, Start: start, End: start, Attrs: attrs, Step: step, Open: true})
-		return len(spans) - 1
-	}
+func (b *traceBuilder) child(seq int, name string, kind int, start time.Time, attrs ...Attr) int {
+	b.spans = append(b.spans, Span{TraceID: b.traceID, SpanID: id(16, b.traceID, strconv.Itoa(seq), name),
+		ParentID: b.rootID, Name: name, Kind: kind, Start: start, End: start, Attrs: attrs, Step: b.step, Open: true})
+	return len(b.spans) - 1
+}
 
-	for _, e := range events {
-		switch e.Type {
-		case EvRunStarted: // the root span, built above
-		case EvModelDecided:
-			step = e.Step
-			var proposed []string
-			for _, c := range e.Message.ToolCalls {
-				proposed = append(proposed, c.Function.Name)
-			}
-			attrs := []Attr{{"gen_ai.operation.name", "chat"}, {"gen_ai.provider.name", first.Provider},
-				{"gen_ai.request.model", first.Model}, {"gen_ai.response.finish_reasons", []string{e.FinishReason}},
-				{"agentsafe.step", e.Step}, {"agentsafe.proposed_tools", proposed}}
-			if e.Usage != nil {
-				attrs = append(attrs, Attr{"gen_ai.usage.input_tokens", e.Usage.PromptTokens},
-					Attr{"gen_ai.usage.output_tokens", e.Usage.CompletionTokens})
-			}
-			name := "chat " + first.Model // semconv: {gen_ai.operation.name} {gen_ai.request.model}
-			if first.Model == "" {
-				name = "chat" // logs from before run_started recorded the model
-			}
-			i := child(e.Seq, name, kindClient, prev, attrs...)
-			spans[i].End, spans[i].Open, spans[i].Status = e.Time, false, statusOK
-
-		case EvToolStarted:
-			if i, ok := open[e.CallID]; ok { // a second start: the previous attempt died mid-call (week 3 W3-4)
-				spans[i].Events = append(spans[i].Events, SpanEvent{Time: e.Time,
-					Name: "retry: previous attempt has no logged outcome and may have executed"})
-				setAttr(&spans[i], "agentsafe.attempts", attrInt(spans[i], "agentsafe.attempts")+1)
-				break
-			}
-			open[e.CallID] = child(e.Seq, "execute_tool "+e.Tool, kindInternal, e.Time,
-				Attr{"gen_ai.operation.name", "execute_tool"}, Attr{"gen_ai.tool.name", e.Tool},
-				Attr{"gen_ai.tool.call.id", e.CallID}, Attr{"gen_ai.tool.type", "function"},
-				Attr{"agentsafe.idempotency.key", e.Key}, Attr{"agentsafe.attempts", 1})
-
-		case EvToolResult:
-			i, ok := open[e.CallID]
-			if !ok {
-				return nil, fmt.Errorf("tool_result %s without an open span", e.CallID)
-			}
-			delete(open, e.CallID)
-			outcome := outcomeOf(e)
-			spans[i].End, spans[i].Open = e.Time, false
-			setAttr(&spans[i], "agentsafe.outcome", outcome)
-			if outcome == "error" || outcome == "conflict" {
-				spans[i].Status, spans[i].StatusMsg = statusError, errorText(e.Result)
-			} else {
-				spans[i].Status = statusOK
-			}
-
-		case EvToolRefused: // never attempted: failed validation, or rejected (its approval span is already closed)
-			j := child(e.Seq, "execute_tool "+e.Tool, kindInternal, e.Time,
-				Attr{"gen_ai.operation.name", "execute_tool"}, Attr{"gen_ai.tool.name", e.Tool},
-				Attr{"gen_ai.tool.call.id", e.CallID}, Attr{"gen_ai.tool.type", "function"},
-				Attr{"agentsafe.outcome", "refused"}, Attr{"agentsafe.attempts", 0})
-			spans[j].Open, spans[j].Status, spans[j].StatusMsg = false, statusError, errorText(e.Result)
-
-		case EvApprovalRequested:
-			open["approval:"+e.CallID] = child(e.Seq, "approval "+e.Tool, kindInternal, e.Time,
-				Attr{"agentsafe.approval.key", e.Key}, Attr{"agentsafe.approval.summary", e.Summary})
-
-		case EvApprovalDecided:
-			if i, ok := open["approval:"+e.CallID]; ok {
-				delete(open, "approval:"+e.CallID)
-				spans[i].End, spans[i].Open, spans[i].Status = e.Time, false, statusOK
-				setAttr(&spans[i], "agentsafe.approval.decision", e.Decision)
-				setAttr(&spans[i], "agentsafe.approval.by", e.By)
-				if e.Reason != "" {
-					setAttr(&spans[i], "agentsafe.approval.reason", e.Reason)
-				}
-			}
-
-		case EvApprovalDenied:
-			if i, ok := open["approval:"+e.CallID]; ok {
-				spans[i].Events = append(spans[i].Events, SpanEvent{Time: e.Time, Name: "denied: " + e.Decision + " by " + e.By,
-					Attrs: []Attr{{"agentsafe.approval.denied_reason", e.Reason}}})
-			}
-		case EvRunPaused:
-			root.Events = append(root.Events, SpanEvent{Time: e.Time, Name: "paused: " + e.Reason})
-		case EvBudgetExtended:
-			root.Events = append(root.Events, SpanEvent{Time: e.Time, Name: "budget_extended",
-				Attrs: []Attr{{"agentsafe.extra_steps", e.ExtraSteps}, {"agentsafe.by", e.By}}})
-		case EvRunFinished:
-			root.Events = append(root.Events, SpanEvent{Time: e.Time, Name: "finished: " + e.Stop})
+func (b *traceBuilder) add(e Event) error {
+	switch e.Type {
+	case EvRunStarted: // the root span, built in newTraceBuilder
+	case EvModelDecided:
+		b.chat(e)
+	case EvToolStarted:
+		b.toolStarted(e)
+	case EvToolResult:
+		return b.toolResult(e)
+	case EvToolRefused:
+		b.toolRefused(e)
+	case EvApprovalRequested:
+		b.open["approval:"+e.CallID] = b.child(e.Seq, "approval "+e.Tool, kindInternal, e.Time,
+			Attr{"agentsafe.approval.key", e.Key}, Attr{"agentsafe.approval.summary", e.Summary})
+	case EvApprovalDecided:
+		b.approvalDecided(e)
+	case EvApprovalDenied:
+		if i, ok := b.open["approval:"+e.CallID]; ok {
+			b.spans[i].Events = append(b.spans[i].Events, SpanEvent{Time: e.Time, Name: "denied: " + e.Decision + " by " + e.By,
+				Attrs: []Attr{{"agentsafe.approval.denied_reason", e.Reason}}})
 		}
-		prev = e.Time
+	case EvRunPaused:
+		b.root.Events = append(b.root.Events, SpanEvent{Time: e.Time, Name: "paused: " + e.Reason})
+	case EvBudgetExtended:
+		b.root.Events = append(b.root.Events, SpanEvent{Time: e.Time, Name: "budget_extended",
+			Attrs: []Attr{{"agentsafe.extra_steps", e.ExtraSteps}, {"agentsafe.by", e.By}}})
+	case EvRunFinished:
+		b.root.Events = append(b.root.Events, SpanEvent{Time: e.Time, Name: "finished: " + e.Stop})
 	}
-	for _, i := range open { // started, no outcome: exactly the "maybe executed" state, made visible
-		spans[i].End = root.End
-		spans[i].StatusMsg = "no outcome in the log: waiting, in progress, or crashed mid-call"
+	return nil
+}
+
+// chat is one model call. It starts at the previous event: the request was sent after it.
+func (b *traceBuilder) chat(e Event) {
+	b.step = e.Step
+	var proposed []string
+	for _, c := range e.Message.ToolCalls {
+		proposed = append(proposed, c.Function.Name)
 	}
-	sort.SliceStable(spans, func(a, b int) bool { return spans[a].Start.Before(spans[b].Start) })
-	return &Trace{Spans: append([]Span{root}, spans...)}, nil
+	attrs := []Attr{{"gen_ai.operation.name", "chat"}, {"gen_ai.provider.name", b.first.Provider},
+		{"gen_ai.request.model", b.first.Model}, {"gen_ai.response.finish_reasons", []string{e.FinishReason}},
+		{"agentsafe.step", e.Step}, {"agentsafe.proposed_tools", proposed}}
+	if e.Usage != nil {
+		attrs = append(attrs, Attr{"gen_ai.usage.input_tokens", e.Usage.PromptTokens},
+			Attr{"gen_ai.usage.output_tokens", e.Usage.CompletionTokens})
+	}
+	name := "chat " + b.first.Model // semconv: {gen_ai.operation.name} {gen_ai.request.model}
+	if b.first.Model == "" {
+		name = "chat" // logs from before run_started recorded the model
+	}
+	i := b.child(e.Seq, name, kindClient, b.prev, attrs...)
+	b.spans[i].End, b.spans[i].Open, b.spans[i].Status = e.Time, false, statusOK
+}
+
+func (b *traceBuilder) toolStarted(e Event) {
+	if i, ok := b.open[e.CallID]; ok { // a second start: the previous attempt died mid-call (week 3 W3-4)
+		b.spans[i].Events = append(b.spans[i].Events, SpanEvent{Time: e.Time,
+			Name: "retry: previous attempt has no logged outcome and may have executed"})
+		setAttr(&b.spans[i], "agentsafe.attempts", attrInt(b.spans[i], "agentsafe.attempts")+1)
+		return
+	}
+	b.open[e.CallID] = b.child(e.Seq, "execute_tool "+e.Tool, kindInternal, e.Time,
+		Attr{"gen_ai.operation.name", "execute_tool"}, Attr{"gen_ai.tool.name", e.Tool},
+		Attr{"gen_ai.tool.call.id", e.CallID}, Attr{"gen_ai.tool.type", "function"},
+		Attr{"agentsafe.idempotency.key", e.Key}, Attr{"agentsafe.attempts", 1})
+}
+
+func (b *traceBuilder) toolResult(e Event) error {
+	i, ok := b.open[e.CallID]
+	if !ok {
+		return fmt.Errorf("tool_result %s without an open span", e.CallID)
+	}
+	delete(b.open, e.CallID)
+	outcome := outcomeOf(e)
+	b.spans[i].End, b.spans[i].Open = e.Time, false
+	setAttr(&b.spans[i], "agentsafe.outcome", outcome)
+	if outcome == "error" || outcome == "conflict" {
+		b.spans[i].Status, b.spans[i].StatusMsg = statusError, errorText(e.Result)
+	} else {
+		b.spans[i].Status = statusOK
+	}
+	return nil
+}
+
+// toolRefused: never attempted (failed validation, or rejected: its approval span is already closed).
+func (b *traceBuilder) toolRefused(e Event) {
+	j := b.child(e.Seq, "execute_tool "+e.Tool, kindInternal, e.Time,
+		Attr{"gen_ai.operation.name", "execute_tool"}, Attr{"gen_ai.tool.name", e.Tool},
+		Attr{"gen_ai.tool.call.id", e.CallID}, Attr{"gen_ai.tool.type", "function"},
+		Attr{"agentsafe.outcome", "refused"}, Attr{"agentsafe.attempts", 0})
+	b.spans[j].Open, b.spans[j].Status, b.spans[j].StatusMsg = false, statusError, errorText(e.Result)
+}
+
+func (b *traceBuilder) approvalDecided(e Event) {
+	i, ok := b.open["approval:"+e.CallID]
+	if !ok {
+		return
+	}
+	delete(b.open, "approval:"+e.CallID)
+	b.spans[i].End, b.spans[i].Open, b.spans[i].Status = e.Time, false, statusOK
+	setAttr(&b.spans[i], "agentsafe.approval.decision", e.Decision)
+	setAttr(&b.spans[i], "agentsafe.approval.by", e.By)
+	if e.Reason != "" {
+		setAttr(&b.spans[i], "agentsafe.approval.reason", e.Reason)
+	}
+}
+
+// finish closes what has no outcome (exactly the "maybe executed" state, made visible) and orders the spans.
+func (b *traceBuilder) finish() *Trace {
+	for _, i := range b.open {
+		b.spans[i].End = b.root.End
+		b.spans[i].StatusMsg = "no outcome in the log: waiting, in progress, or crashed mid-call"
+	}
+	sort.SliceStable(b.spans, func(x, y int) bool { return b.spans[x].Start.Before(b.spans[y].Start) })
+	return &Trace{Spans: append([]Span{b.root}, b.spans...)}
 }
 
 func outcomeOf(e Event) string {

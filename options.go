@@ -93,8 +93,19 @@ func (r *Runner) Validate() error {
 	if r.Authorizer != nil && r.AnyApprover {
 		bad("both an Authorizer and AnyApprover: choose one")
 	}
+	gated := r.validateTools(bad)
+	if gated && r.Authorizer == nil && !r.AnyApprover {
+		bad("tools need approval but nobody may give it: set WithAuthorizer, or WithAnyApprover (%w)", ErrNoAuthorizer)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %w", ErrConfig, errors.Join(errs...))
+	}
+	return nil
+}
+
+// validateTools checks names and capabilities, and reports whether any tool can need an approval.
+func (r *Runner) validateTools(bad func(string, ...any)) (gated bool) {
 	seen := map[string]bool{}
-	gated := false
 	for i, t := range r.Tools {
 		if t == nil {
 			bad("tool %d is nil", i)
@@ -109,7 +120,7 @@ func (r *Runner) Validate() error {
 		}
 		seen[name] = true
 		if c, ok := t.(interface{ configErr() error }); ok && c.configErr() != nil {
-			errs = append(errs, c.configErr())
+			bad("%w", c.configErr())
 		}
 		if w, ok := t.(interface{ wantsApproval() bool }); ok && w.wantsApproval() {
 			gated = true
@@ -121,11 +132,5 @@ func (r *Runner) Validate() error {
 			}
 		}
 	}
-	if gated && r.Authorizer == nil && !r.AnyApprover {
-		bad("tools need approval but nobody may give it: set WithAuthorizer, or WithAnyApprover (%w)", ErrNoAuthorizer)
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%w: %w", ErrConfig, errors.Join(errs...))
-	}
-	return nil
+	return gated
 }
