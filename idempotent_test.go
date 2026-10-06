@@ -141,7 +141,7 @@ func TestLargeNumbersDontShareAKey(t *testing.T) {
 	}
 	// 1e-500 underflows to 0 without an error from ParseFloat; computed exactly, a model could make every key
 	// cost a huge allocation (math/big itself only refuses exponents near 10^7).
-	for _, n := range []string{"1e-500", "1e500", "2E+401"} {
+	for _, n := range []string{"1e-500", "1e500", "2E+401", "1e309", "[1,1e500]"} { // 1e309: within the guard, beyond float64
 		if _, err := Canonical(json.RawMessage(`{"x":` + n + `}`)); err == nil || !strings.Contains(err.Error(), "out of range") {
 			t.Fatalf("%s must be refused as out of range, got %v", n, err)
 		}

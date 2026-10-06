@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Rules the code claims on its error paths, one test each.
@@ -280,5 +281,69 @@ func TestSameOnBooleans(t *testing.T) {
 	}
 	if eq, why := Same(true, false); eq || !strings.Contains(why, "false, should be true") {
 		t.Errorf("got %v %q", eq, why)
+	}
+}
+
+// A tool without Validate still never receives arguments that aren't JSON: the model is told.
+func TestInvalidJSONNeverReachesAPlainTool(t *testing.T) {
+	tool := &plain{name: "export", do: func(context.Context) (any, error) { return "ran", nil }}
+	r, _ := New(&ScriptedModel{Plan: []FunctionCall{{Name: "export", Arguments: `{oops`}}, Final: "done"},
+		&FileLog{Path: filepath.Join(t.TempDir(), "r.jsonl")}, WithTools(tool))
+	if _, err := r.Start(context.Background(), "s", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if tool.calls.Load() != 0 {
+		t.Fatal("a tool must never be called with arguments that aren't JSON")
+	}
+}
+
+// Cancelling the run between steps stops it there; nothing further is decided or done.
+type cancelsAfterFirst struct {
+	cancel func()
+	calls  int
+}
+
+func (m *cancelsAfterFirst) Decide(context.Context, []Message, []ToolSpec) (Decision, error) {
+	m.calls++
+	m.cancel() // the caller gives up while this step is being recorded
+	return Decision{Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Type: "function",
+		Function: FunctionCall{Name: "export", Arguments: `{}`}}}}, FinishReason: "tool_calls"}, nil
+}
+
+func TestCancellingBetweenStepsStopsTheRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tool := &plain{name: "export", do: func(context.Context) (any, error) { return "ran", nil }}
+	m := &cancelsAfterFirst{cancel: cancel}
+	r, _ := New(m, &memLog{}, WithTools(tool), WithoutLease())
+	if _, err := r.Start(ctx, "s", "t"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if m.calls != 1 || tool.calls.Load() != 0 {
+		t.Fatalf("nothing may happen after the cancellation: model calls %d, tool calls %d", m.calls, tool.calls.Load())
+	}
+}
+
+// Cancellation during the wait between same-key retries ends the wait at once: the operation is in doubt.
+func TestCancelDuringRetryBackoff(t *testing.T) {
+	g := newGateway(t, "504", "504", "504")
+	r := chargeRun(t, g)
+	r.ToolBackoff = time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	t0 := time.Now()
+	if _, err := r.Start(ctx, "s", "t"); !errors.Is(err, ErrInDoubt) || time.Since(t0) > 5*time.Second {
+		t.Fatalf("want a prompt ErrInDoubt, got %v after %s", err, time.Since(t0))
+	}
+}
+
+// A log that reads cleanly but describes an impossible history is refused by every entry point, not resumed.
+func TestReadableButImpossibleHistoryIsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r.jsonl")
+	if err := writeFile(path, "{\"seq\":1,\"type\":\"tool_result\",\"call_id\":\"x\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := New(&ScriptedModel{Final: "x"}, &FileLog{Path: path})
+	if _, err := r.Continue(context.Background()); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("got %v", err)
 	}
 }
