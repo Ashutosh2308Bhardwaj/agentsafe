@@ -6,6 +6,11 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
+A restructure before the API settles: the core package is split, the largest functions are broken up, and a
+`Runner` written as a struct literal is checked like one built with `New`. Every module moves to v0.2.0.
+
 ### Breaking
 
 The core package is split so each part can be found and used on its own. To migrate:
@@ -26,6 +31,12 @@ The core package is split so each part can be found and used on its own. To migr
   anything; a run whose gated tools nobody may approve is now refused at `Start` (`ErrConfig` wrapping
   `ErrNoAuthorizer`) instead of at its first decision.
 - `Reconcile` reports findings of equal severity in a stable order.
+
+### Modules
+
+- **`sqlite/v0.2.0`, `postgres/v0.2.0`**: the lease heartbeat is shared code (`internal/heartbeat`); behaviour
+  unchanged. They require core v0.2.0.
+- **`anthropic/v0.2.0`, `gemini/v0.2.0`**: no changes besides requiring core v0.2.0.
 
 ## [0.1.0] - 2026-10-06
 
@@ -60,5 +71,6 @@ The first release: correctness primitives for LLM agents that act on money, hard
 - A payout a human rejected could be approved if the model proposed it again under a new call id (found by property tests).
 - The example gateway charged once per key only for sequential calls, not simultaneous ones.
 
-[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/releases/tag/v0.1.0
