@@ -328,8 +328,12 @@ func (t *Trace) Tree() string {
 		indent, line := "├─ ", ""
 		switch {
 		case s.Name == "chat" || strings.HasPrefix(s.Name, "chat "):
-			line = fmt.Sprintf("step %v  %s  %s  %v in / %v out  → %v", get(s, "agentsafe.step"), s.Name, dur(s),
-				get(s, "gen_ai.usage.input_tokens"), get(s, "gen_ai.usage.output_tokens"), list(get(s, "agentsafe.proposed_tools"), get(s, "gen_ai.response.finish_reasons")))
+			tokens := "" // providers that don't report usage (and the scripted model) show none, not blanks
+			if in := get(s, "gen_ai.usage.input_tokens"); in != nil && in != "" {
+				tokens = fmt.Sprintf("  %v in / %v out", in, get(s, "gen_ai.usage.output_tokens"))
+			}
+			line = fmt.Sprintf("step %v  %s  %s%s  → %v", get(s, "agentsafe.step"), s.Name, dur(s), tokens,
+				list(get(s, "agentsafe.proposed_tools"), get(s, "gen_ai.response.finish_reasons")))
 		case strings.HasPrefix(s.Name, "execute_tool "):
 			indent = "│   └─ "
 			line = fmt.Sprintf("%s  %s  %v", s.Name, dur(s), get(s, "agentsafe.outcome"))
