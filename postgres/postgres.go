@@ -13,13 +13,11 @@ package postgres
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	"github.com/Ashutosh2308Bhardwaj/agentsafe/internal/heartbeat"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -135,9 +133,7 @@ func (r *Run) Lock(ctx context.Context) (func() error, error) {
 type lease struct {
 	r      *Run
 	holder string
-	stop   chan struct{}
-	done   sync.WaitGroup
-	once   sync.Once
+	hb     *heartbeat.Heartbeat
 }
 
 func (r *Run) ttl() time.Duration {
@@ -148,11 +144,11 @@ func (r *Run) ttl() time.Duration {
 }
 
 func (r *Run) acquire(ctx context.Context) (*lease, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
+	holder, err := heartbeat.Holder()
+	if err != nil {
 		return nil, err
 	}
-	l := &lease{r: r, holder: hex.EncodeToString(b), stop: make(chan struct{})}
+	l := &lease{r: r, holder: holder}
 	tag, err := r.d.pool.Exec(ctx, `
 		INSERT INTO agentsafe_leases (run_id, holder, expires_at) VALUES ($1, $2, now() + $3 * interval '1 millisecond')
 		ON CONFLICT (run_id) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
@@ -163,37 +159,17 @@ func (r *Run) acquire(ctx context.Context) (*lease, error) {
 	if tag.RowsAffected() == 0 {
 		return nil, fmt.Errorf("%w (run %s)", agentsafe.ErrRunLocked, r.id)
 	}
-	l.done.Add(1)
-	// Renewal lives as long as the LEASE (until release), not the call that took it: tied to ctx, the lease
-	// would silently stop renewing when that request ended.
-	go l.renew() //nolint:gosec // G118: deliberate, see above
+	// Only extends a lease we still hold: if it was lost (expired and taken), this updates nothing, and our next
+	// append is fenced.
+	l.hb = heartbeat.Start(r.ttl(), func(ctx context.Context) {
+		_, _ = l.r.d.pool.Exec(ctx, `UPDATE agentsafe_leases SET expires_at = now() + $3 * interval '1 millisecond'
+			WHERE run_id = $1 AND holder = $2`, l.r.id, l.holder, l.r.ttl().Milliseconds())
+	})
 	return l, nil
 }
 
-func (l *lease) renew() {
-	defer l.done.Done()
-	t := time.NewTicker(l.r.ttl() / 3)
-	defer t.Stop()
-	for {
-		select {
-		case <-l.stop:
-			return
-		case <-t.C:
-			// Only extends a lease we still hold. If it was lost (expired and taken), this updates nothing,
-			// and our next append is fenced.
-			ctx, cancel := context.WithTimeout(context.Background(), l.r.ttl()/3)
-			_, _ = l.r.d.pool.Exec(ctx, `UPDATE agentsafe_leases SET expires_at = now() + $3 * interval '1 millisecond'
-				WHERE run_id = $1 AND holder = $2`, l.r.id, l.holder, l.r.ttl().Milliseconds())
-			cancel()
-		}
-	}
-}
-
 // stopRenewing stops the heartbeat without giving the lease up: what a crash does.
-func (l *lease) stopRenewing() {
-	l.once.Do(func() { close(l.stop) })
-	l.done.Wait()
-}
+func (l *lease) stopRenewing() { l.hb.Stop() }
 
 func (l *lease) release() error {
 	l.stopRenewing()

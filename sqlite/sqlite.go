@@ -11,15 +11,13 @@ package sqlite
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	"github.com/Ashutosh2308Bhardwaj/agentsafe/internal/heartbeat"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
@@ -158,9 +156,7 @@ func (r *Run) Lock(ctx context.Context) (func() error, error) {
 type lease struct {
 	r      *Run
 	holder string
-	stop   chan struct{}
-	done   sync.WaitGroup
-	once   sync.Once
+	hb     *heartbeat.Heartbeat
 }
 
 func (r *Run) ttl() time.Duration {
@@ -171,11 +167,11 @@ func (r *Run) ttl() time.Duration {
 }
 
 func (r *Run) acquire(ctx context.Context) (*lease, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
+	holder, err := heartbeat.Holder()
+	if err != nil {
 		return nil, err
 	}
-	l := &lease{r: r, holder: hex.EncodeToString(b), stop: make(chan struct{})}
+	l := &lease{r: r, holder: holder}
 	now := time.Now()
 	res, err := r.d.db.ExecContext(ctx, `
 		INSERT INTO agentsafe_leases (run_id, holder, expires_at) VALUES (?1, ?2, ?3)
@@ -190,33 +186,17 @@ func (r *Run) acquire(ctx context.Context) (*lease, error) {
 	} else if n == 0 {
 		return nil, fmt.Errorf("%w (run %s)", agentsafe.ErrRunLocked, r.id)
 	}
-	l.done.Add(1)
-	go l.renew()
+	// Only extends a lease we still hold: if it was lost (expired and taken), this updates nothing, and our next
+	// append is fenced.
+	l.hb = heartbeat.Start(r.ttl(), func(ctx context.Context) {
+		_, _ = l.r.d.db.ExecContext(ctx, `UPDATE agentsafe_leases SET expires_at = ? WHERE run_id = ? AND holder = ?`,
+			time.Now().Add(l.r.ttl()).UnixMilli(), l.r.id, l.holder)
+	})
 	return l, nil
 }
 
-func (l *lease) renew() {
-	defer l.done.Done()
-	t := time.NewTicker(l.r.ttl() / 3)
-	defer t.Stop()
-	for {
-		select {
-		case <-l.stop:
-			return
-		case <-t.C:
-			// Only extends a lease we still hold. If it was lost (expired and taken), this updates nothing,
-			// and our next append is fenced.
-			_, _ = l.r.d.db.Exec(`UPDATE agentsafe_leases SET expires_at = ? WHERE run_id = ? AND holder = ?`,
-				time.Now().Add(l.r.ttl()).UnixMilli(), l.r.id, l.holder)
-		}
-	}
-}
-
 // stopRenewing stops the heartbeat without giving the lease up: what a crash does.
-func (l *lease) stopRenewing() {
-	l.once.Do(func() { close(l.stop) })
-	l.done.Wait()
-}
+func (l *lease) stopRenewing() { l.hb.Stop() }
 
 func (l *lease) release() error {
 	l.stopRenewing()
