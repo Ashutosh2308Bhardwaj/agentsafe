@@ -1,4 +1,13 @@
-package agentsafe
+// Package trace turns an agentsafe run's log into OpenTelemetry spans, following the GenAI semantic
+// conventions: the run (invoke_agent), each model call (chat), each tool call (execute_tool), each approval.
+//
+//	events, _ := log.Read(ctx)
+//	tr, err := trace.Build(events, "payouts")
+//	tr.Redact(agentsafe.RedactFields("payee"))   // before it leaves the process
+//	otlp, err := tr.OTLPJSON("payouts-service")   // POST to any OTLP/HTTP collector
+//
+// The log is the only input, so a trace can't disagree with it, and the same log always gives the same trace.
+package trace
 
 import (
 	"crypto/sha256"
@@ -9,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
 
 // A trace is built FROM the event log, never recorded separately: the log is the source of truth, so the
@@ -66,16 +77,16 @@ func id(n int, parts ...string) string {
 	return hex.EncodeToString(h[:])[:n]
 }
 
-// BuildTrace turns a run's events into a trace. agent names the root span (gen_ai.agent.name).
-func BuildTrace(events []Event, agent string) (*Trace, error) {
-	st, err := Rebuild(events) // a trace of an invalid log would be a confident lie: refuse it
+// Build turns a run's events into a trace. agent names the root span (gen_ai.agent.name).
+func Build(events []agentsafe.Event, agent string) (*Trace, error) {
+	st, err := agentsafe.Rebuild(events) // a trace of an invalid log would be a confident lie: refuse it
 	if err != nil {
 		return nil, fmt.Errorf("log is not a valid run: %w", err)
 	}
-	if events, err = UpgradeAll(events); err != nil {
+	if events, err = agentsafe.UpgradeAll(events); err != nil {
 		return nil, err
 	}
-	if len(events) == 0 || events[0].Type != EvRunStarted {
+	if len(events) == 0 || events[0].Type != agentsafe.EvRunStarted {
 		return nil, fmt.Errorf("log does not start with run_started")
 	}
 	b := newTraceBuilder(events, agent, st)
@@ -90,7 +101,7 @@ func BuildTrace(events []Event, agent string) (*Trace, error) {
 
 // traceBuilder turns events into spans: the run (root), one per model call, one per tool call, one per approval.
 type traceBuilder struct {
-	first           Event
+	first           agentsafe.Event
 	traceID, rootID string
 	root            Span
 	spans           []Span
@@ -99,7 +110,7 @@ type traceBuilder struct {
 	prev            time.Time // the event before the current one: a chat span starts there
 }
 
-func newTraceBuilder(events []Event, agent string, st State) *traceBuilder {
+func newTraceBuilder(events []agentsafe.Event, agent string, st agentsafe.State) *traceBuilder {
 	first := events[0]
 	b := &traceBuilder{first: first, open: map[string]int{}, prev: first.Time}
 	b.traceID = id(32, "trace", first.Time.Format(time.RFC3339Nano), first.Task)
@@ -118,9 +129,9 @@ func newTraceBuilder(events []Event, agent string, st State) *traceBuilder {
 			{"agentsafe.log.events", len(events)},
 		}}
 	switch st.Status {
-	case StatusFinished:
+	case agentsafe.StatusFinished:
 		b.root.Status = statusOK
-	case StatusPaused, StatusAwaitingApproval:
+	case agentsafe.StatusPaused, agentsafe.StatusAwaitingApproval:
 		b.root.Open, b.root.StatusMsg = true, "run is "+string(st.Status)
 	default:
 		b.root.Open, b.root.StatusMsg = true, "run has no terminal event: in progress or crashed"
@@ -134,40 +145,40 @@ func (b *traceBuilder) child(seq int, name string, kind int, start time.Time, at
 	return len(b.spans) - 1
 }
 
-func (b *traceBuilder) add(e Event) error {
+func (b *traceBuilder) add(e agentsafe.Event) error {
 	switch e.Type {
-	case EvRunStarted: // the root span, built in newTraceBuilder
-	case EvModelDecided:
+	case agentsafe.EvRunStarted: // the root span, built in newTraceBuilder
+	case agentsafe.EvModelDecided:
 		b.chat(e)
-	case EvToolStarted:
+	case agentsafe.EvToolStarted:
 		b.toolStarted(e)
-	case EvToolResult:
+	case agentsafe.EvToolResult:
 		return b.toolResult(e)
-	case EvToolRefused:
+	case agentsafe.EvToolRefused:
 		b.toolRefused(e)
-	case EvApprovalRequested:
+	case agentsafe.EvApprovalRequested:
 		b.open["approval:"+e.CallID] = b.child(e.Seq, "approval "+e.Tool, kindInternal, e.Time,
 			Attr{"agentsafe.approval.key", e.Key}, Attr{"agentsafe.approval.summary", e.Summary})
-	case EvApprovalDecided:
+	case agentsafe.EvApprovalDecided:
 		b.approvalDecided(e)
-	case EvApprovalDenied:
+	case agentsafe.EvApprovalDenied:
 		if i, ok := b.open["approval:"+e.CallID]; ok {
 			b.spans[i].Events = append(b.spans[i].Events, SpanEvent{Time: e.Time, Name: "denied: " + e.Decision + " by " + e.By,
 				Attrs: []Attr{{"agentsafe.approval.denied_reason", e.Reason}}})
 		}
-	case EvRunPaused:
+	case agentsafe.EvRunPaused:
 		b.root.Events = append(b.root.Events, SpanEvent{Time: e.Time, Name: "paused: " + e.Reason})
-	case EvBudgetExtended:
+	case agentsafe.EvBudgetExtended:
 		b.root.Events = append(b.root.Events, SpanEvent{Time: e.Time, Name: "budget_extended",
 			Attrs: []Attr{{"agentsafe.extra_steps", e.ExtraSteps}, {"agentsafe.by", e.By}}})
-	case EvRunFinished:
+	case agentsafe.EvRunFinished:
 		b.root.Events = append(b.root.Events, SpanEvent{Time: e.Time, Name: "finished: " + e.Stop})
 	}
 	return nil
 }
 
 // chat is one model call. It starts at the previous event: the request was sent after it.
-func (b *traceBuilder) chat(e Event) {
+func (b *traceBuilder) chat(e agentsafe.Event) {
 	b.step = e.Step
 	var proposed []string
 	for _, c := range e.Message.ToolCalls {
@@ -188,7 +199,7 @@ func (b *traceBuilder) chat(e Event) {
 	b.spans[i].End, b.spans[i].Open, b.spans[i].Status = e.Time, false, statusOK
 }
 
-func (b *traceBuilder) toolStarted(e Event) {
+func (b *traceBuilder) toolStarted(e agentsafe.Event) {
 	if i, ok := b.open[e.CallID]; ok { // a second start: the previous attempt died mid-call (week 3 W3-4)
 		b.spans[i].Events = append(b.spans[i].Events, SpanEvent{Time: e.Time,
 			Name: "retry: previous attempt has no logged outcome and may have executed"})
@@ -201,7 +212,7 @@ func (b *traceBuilder) toolStarted(e Event) {
 		Attr{"agentsafe.idempotency.key", e.Key}, Attr{"agentsafe.attempts", 1})
 }
 
-func (b *traceBuilder) toolResult(e Event) error {
+func (b *traceBuilder) toolResult(e agentsafe.Event) error {
 	i, ok := b.open[e.CallID]
 	if !ok {
 		return fmt.Errorf("tool_result %s without an open span", e.CallID)
@@ -219,7 +230,7 @@ func (b *traceBuilder) toolResult(e Event) error {
 }
 
 // toolRefused: never attempted (failed validation, or rejected: its approval span is already closed).
-func (b *traceBuilder) toolRefused(e Event) {
+func (b *traceBuilder) toolRefused(e agentsafe.Event) {
 	j := b.child(e.Seq, "execute_tool "+e.Tool, kindInternal, e.Time,
 		Attr{"gen_ai.operation.name", "execute_tool"}, Attr{"gen_ai.tool.name", e.Tool},
 		Attr{"gen_ai.tool.call.id", e.CallID}, Attr{"gen_ai.tool.type", "function"},
@@ -227,7 +238,7 @@ func (b *traceBuilder) toolRefused(e Event) {
 	b.spans[j].Open, b.spans[j].Status, b.spans[j].StatusMsg = false, statusError, errorText(e.Result)
 }
 
-func (b *traceBuilder) approvalDecided(e Event) {
+func (b *traceBuilder) approvalDecided(e agentsafe.Event) {
 	i, ok := b.open["approval:"+e.CallID]
 	if !ok {
 		return
@@ -251,7 +262,7 @@ func (b *traceBuilder) finish() *Trace {
 	return &Trace{Spans: append([]Span{b.root}, b.spans...)}
 }
 
-func outcomeOf(e Event) string {
+func outcomeOf(e agentsafe.Event) string {
 	if e.Replayed {
 		if strings.Contains(e.Result, "conflict") {
 			return "conflict"

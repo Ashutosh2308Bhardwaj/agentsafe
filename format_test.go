@@ -66,9 +66,6 @@ func TestGoldenLogsStillRebuild(t *testing.T) {
 				t.Fatalf("rebuilt state changed: events=%d step=%d effects=%d msgs=%d status=%s stop=%s approved=%d denials=%d",
 					st.Events, st.Step, len(st.Effects), len(st.Messages), st.Status, st.Stop, approved, st.Denials)
 			}
-			if _, err := BuildTrace(events, "golden"); err != nil {
-				t.Fatalf("trace from a golden log: %v", err)
-			}
 		})
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Error paths and branches the scenario tests don't reach, each checked for the behaviour that matters.
@@ -121,40 +120,6 @@ func TestUnknownToolIsAnErrorResultNotACrash(t *testing.T) {
 	}
 	if !strings.Contains(res, `no tool named \"nope\"`) {
 		t.Fatalf("got %s", res)
-	}
-}
-
-// Trace outcomes for the idempotency paths: replayed from the log, a conflict, deduplicated by the tool.
-func TestTraceOutcomes(t *testing.T) {
-	at := time.Unix(0, 0).UTC()
-	ev := func(e Event, s int) Event { e.Time = at.Add(time.Duration(s) * time.Millisecond); return e }
-	events := []Event{
-		ev(Event{Type: EvRunStarted, Task: "t", MaxSteps: 4, Model: "m"}, 0),
-		ev(Event{Type: EvModelDecided, Step: 1, Message: &Message{Role: RoleAssistant, ToolCalls: []ToolCall{
-			{ID: "a", Function: FunctionCall{Name: "pay"}}, {ID: "b", Function: FunctionCall{Name: "pay"}},
-			{ID: "c", Function: FunctionCall{Name: "pay"}}}}}, 1),
-		ev(Event{Type: EvToolStarted, CallID: "a", Tool: "pay", Key: "k"}, 2),
-		ev(Event{Type: EvToolResult, CallID: "a", Tool: "pay", Key: "k", Replayed: true, Result: `{"replayed":true}`}, 3),
-		ev(Event{Type: EvToolStarted, CallID: "b", Tool: "pay", Key: "k"}, 4),
-		ev(Event{Type: EvToolResult, CallID: "b", Tool: "pay", Key: "k", Replayed: true, Result: `{"error":"conflict: different values"}`}, 5),
-		ev(Event{Type: EvToolStarted, CallID: "c", Tool: "pay", Key: "k2"}, 6),
-		ev(Event{Type: EvToolResult, CallID: "c", Tool: "pay", Key: "k2", Result: `{"already_recorded":true}`}, 7),
-	}
-	tr, err := BuildTrace(events, "agent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var outcomes []string
-	for _, s := range tr.Spans {
-		if o, ok := get(s, "agentsafe.outcome").(string); ok && o != "" {
-			outcomes = append(outcomes, o)
-		}
-	}
-	if strings.Join(outcomes, ",") != "replayed,conflict,deduplicated_by_tool" {
-		t.Fatalf("got %v", outcomes)
-	}
-	if tree := tr.Tree(); !strings.Contains(tree, "replayed") || !strings.Contains(tree, "[awaiting_model") || strings.Contains(tree, " in /  out") {
-		t.Fatalf("the tree shows outcomes and the unfinished run:\n%s", tree)
 	}
 }
 

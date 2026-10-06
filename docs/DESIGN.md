@@ -22,7 +22,7 @@ An LLM agent that calls tools is a distributed system with an unreliable, non-de
             │ Tools: Func(...) → Validator · IdempotentTool · Gated · Timeout   │
             └──────────────────────────────────────────────────────────────────┘
  offline:  Rebuild(events) → State      Reconcile(expected, actual, events, claims)
-           BuildTrace(events) → OpenTelemetry spans
+           trace.Build(events) → OpenTelemetry spans
 ```
 
 - **The log is the only state.** A `Runner` reads the log, rebuilds the run (`Rebuild`), and acts. Any process can pick a run up: after a crash, after an approval that took a week, on another machine.
@@ -133,7 +133,7 @@ Coverage of the core package is 97.2%. The rest falls into three groups; anythin
 - `json.Marshal` / `json.Unmarshal` of values this code just built or already validated: in `Canonical`, `Journal.Append`, `Seal`, `RedactFields`, `maskKeys`, `schemaOf`, `idempotentFuncTool.Identity`;
 - `crypto/rand` failing (`AESGCM.Seal`), and `aes.NewCipher` on a key whose length was just checked;
 - a `big.Rat` that can't parse a number the JSON decoder already accepted (`canonicalNumber`), and the non-decimal fallback in `decimalText`;
-- `default:` branches of switches over closed sets (`compare.go` kinds, `Runner.loop` statuses, `Trace.Tree` span names) and an upgrade step failing (`Upgrade`: every step is the identity today; the first real one comes with its own tests).
+- `default:` branches of switches over closed sets (`compare.go` kinds, `Runner.loop` statuses, `trace.Trace.Tree` span names) and an upgrade step failing (`Upgrade`: every step is the identity today; the first real one comes with its own tests).
 
 **Reachable, untested, low risk** (each returns the error, and nothing acts):
 - operating-system errors other than those tested: `stat`/`open`/read failing with something other than "not found", and the blocking lock failing (`fileStore`); releasing a lease failing (only logged);

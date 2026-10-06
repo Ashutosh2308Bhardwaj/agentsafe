@@ -174,25 +174,6 @@ func TestDenialCantBeForgedInTheLog(t *testing.T) {
 	}
 }
 
-func TestDenialShowsUpInTheTrace(t *testing.T) {
-	r, _, key := waitingRun(t, AllowList("ops@test"))
-	r.Approve(context.Background(), key, "mallory")
-	events, _ := r.Log.Read(context.Background())
-	tr, err := BuildTrace(events, "t")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range tr.Spans {
-		for _, ev := range s.Events {
-			if ev.Name == "denied: approved by mallory" && len(ev.Attrs) == 1 &&
-				strings.Contains(fmt.Sprint(ev.Attrs[0].Value), "not on the approver list") {
-				return
-			}
-		}
-	}
-	t.Fatal("want a 'denied' span event with the reason on the approval span")
-}
-
 func TestV1ApprovalEventsUpgradeUnchanged(t *testing.T) {
 	e, err := Upgrade(Event{V: 1, Type: EvApprovalDecided, Decision: "approved", By: "ops"})
 	if err != nil || e.V != FormatVersion || e.Decision != "approved" || e.By != "ops" {

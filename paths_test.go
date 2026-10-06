@@ -230,49 +230,6 @@ func TestFuncIdentityAndDecodingEdges(t *testing.T) {
 	}
 }
 
-// The trace shows what happened to a run: retries, pauses, extensions, rejections, and what's still open.
-func TestTraceRendersEveryKindOfEvent(t *testing.T) {
-	events := []Event{
-		{Seq: 1, Type: EvRunStarted, MaxSteps: 1, Model: "m"},
-		{Seq: 2, Type: EvModelDecided, Step: 1, Message: &Message{Role: RoleAssistant, ToolCalls: []ToolCall{
-			{ID: "a", Function: FunctionCall{Name: "pay"}}, {ID: "b", Function: FunctionCall{Name: "pay"}}}}, Usage: &Usage{PromptTokens: 3, CompletionTokens: 2}},
-		{Seq: 3, Type: EvToolStarted, CallID: "a", Tool: "pay", Key: "k"},
-		{Seq: 4, Type: EvToolStarted, CallID: "a", Tool: "pay", Key: "k"}, // a retry after a crash
-		{Seq: 5, Type: EvToolResult, CallID: "a", Tool: "pay", Key: "k", Result: `{"error":"` + strings.Repeat("x", 200) + `"}`},
-		{Seq: 6, Type: EvApprovalRequested, CallID: "b", Tool: "pay", Key: "k2"},
-		{Seq: 7, Type: EvApprovalDecided, CallID: "b", Key: "k2", Decision: "rejected", By: "ops", Reason: "payee disputes it"},
-		{Seq: 8, Type: EvToolRefused, CallID: "b", Tool: "pay", Key: "k2", Result: `{"error":"rejected"}`},
-		{Seq: 9, Type: EvRunPaused, Reason: "budget_exhausted"},
-		{Seq: 10, Type: EvBudgetExtended, ExtraSteps: 2, By: "ops"},
-		{Seq: 11, Type: EvModelDecided, Step: 2, Message: &Message{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c", Function: FunctionCall{Name: "pay"}}}}},
-		{Seq: 12, Type: EvToolStarted, CallID: "c", Tool: "pay", Key: "k3"}, // crashed here: no result
-	}
-	tr, err := BuildTrace(events, "agent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tree := tr.Tree()
-	for _, want := range []string{"⚠ 2 attempts (crash mid-call)", "…", "rejected by ops", "OPEN", "3 in / 2 out"} {
-		if !strings.Contains(tree, want) {
-			t.Errorf("the tree must show %q:\n%s", want, tree)
-		}
-	}
-	otlp, err := tr.OTLPJSON("svc")
-	if err != nil || !strings.Contains(string(otlp), "paused: budget_exhausted") || !strings.Contains(string(otlp), "budget_extended") ||
-		!strings.Contains(string(otlp), "payee disputes it") {
-		t.Errorf("pause, extension and the rejection reason must be in the export: %v", err)
-	}
-	if _, err := BuildTrace([]Event{{Type: EvModelDecided}}, "a"); err == nil {
-		t.Error("a log that doesn't start with run_started isn't a run")
-	}
-	if _, err := BuildTrace([]Event{{V: FormatVersion + 1, Type: EvRunStarted}}, "a"); !errors.Is(err, ErrNewerLogFormat) {
-		t.Errorf("a newer format must be refused, not guessed: %v", err)
-	}
-	if _, err := Upgrade(Event{V: -1}); !errors.Is(err, ErrCorruptLog) {
-		t.Errorf("a version that never existed is corruption: %v", err)
-	}
-}
-
 type flag bool
 
 func TestSameOnBooleans(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	"github.com/Ashutosh2308Bhardwaj/agentsafe/trace"
 )
 
 func main() {
@@ -28,7 +29,7 @@ func main() {
 	}
 	events, err := (&agentsafe.FileLog{Path: flag.Arg(0), Codec: logCodec()}).Read(context.Background()) // AGENTSAFE_LOG_KEY for sealed logs
 	check(err)
-	t, err := agentsafe.BuildTrace(events, *agent)
+	t, err := trace.Build(events, *agent)
 	check(err)
 	if *redact != "" {
 		t.Redact(agentsafe.RedactFields(strings.Split(*redact, ",")...))

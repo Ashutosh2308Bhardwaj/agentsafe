@@ -20,7 +20,7 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 
 - **Older events are upgraded on read**, one event at a time, by the steps in `format.go`. A run can mix versions (started by an old library, resumed by a new one).
 - **Newer events are refused** with `ErrNewerLogFormat`. Go's JSON decoder silently drops fields it doesn't know; an old library that skipped a field which mattered would act on the wrong history, so it stops instead.
-- `Rebuild`, `BuildTrace` and `Reconcile` all read upgraded events. A log that can't be read is a CRITICAL reconciliation finding.
+- `Rebuild`, `trace.Build` and `Reconcile` all read upgraded events. A log that can't be read is a CRITICAL reconciliation finding.
 
 ## Changing the format
 

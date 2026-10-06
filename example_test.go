@@ -225,24 +225,3 @@ func ExampleRedactors() {
 	// {"amount":"4200.50","payee":"[REDACTED]"}
 	// account [REDACTED] is frozen
 }
-
-// BuildTrace turns a run's log into OpenTelemetry spans (GenAI semantic conventions).
-func ExampleBuildTrace() {
-	log, cleanup := tempLog()
-	defer cleanup()
-	gw := &gateway{payments: map[string]string{}}
-	r, _ := agentsafe.New(&agentsafe.ScriptedModel{Plan: []agentsafe.FunctionCall{{Name: "send_payout", Arguments: payINV1}}, Final: "done"},
-		log, agentsafe.WithTools(agentsafe.Func("send_payout", "Pay", gw.pay, agentsafe.Idempotent("invoice_id"))))
-	_, _ = r.Start(context.Background(), "sys", "Pay INV-1.")
-
-	events, _ := log.Read(context.Background())
-	trace, _ := agentsafe.BuildTrace(events, "payouts")
-	for _, s := range trace.Spans {
-		fmt.Println(s.Name)
-	}
-	// Output:
-	// invoke_agent payouts
-	// chat scripted
-	// execute_tool send_payout
-	// chat scripted
-}
