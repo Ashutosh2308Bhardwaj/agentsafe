@@ -18,6 +18,7 @@ The core package is split so each part can be found and used on its own. To migr
 | `agentsafe.Reconcile(expected, actual, events, claims)` | `reconcile.Audit(expected, actual, events, claims)` (`.../agentsafe/reconcile`) |
 | `agentsafe.Effect`, `Claim`, `Report`, `Finding`, `Severity`, `Critical`, `Error`, `Warn`, `Same` | the same names in `reconcile` |
 | `agentsafe.Decimal` | unchanged (used by `Func` schemas and by `reconcile`) |
+| `agentsafe.Seal(ctx, e, c)`, `agentsafe.Open(ctx, e, c)` | `agentsafe.SealEvent`, `agentsafe.OpenEvent` (the `Codec` interface's `Seal`/`Open` are unchanged) |
 
 ### Changed
 

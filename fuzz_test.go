@@ -142,7 +142,7 @@ func FuzzOpenSealed(f *testing.F) {
 	f.Add("", 0, "")
 	f.Fuzz(func(_ *testing.T, sealed string, seq int, typ string) {
 		e := Event{Seq: seq, Type: EventType(typ), Sealed: sealed}
-		_, _ = Open(context.Background(), e, k1)
+		_, _ = OpenEvent(context.Background(), e, k1)
 	})
 }
 

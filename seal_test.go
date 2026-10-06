@@ -140,14 +140,14 @@ func TestTamperingWithSealedContentIsDetectedWithoutTheKey(t *testing.T) {
 
 func TestSealedPayloadCantBeMovedToAnotherEvent(t *testing.T) {
 	e := Event{Seq: 4, Type: EvToolResult, CallID: "a", Result: `{"paid":true}`}
-	s, err := Seal(context.Background(), e, k1)
+	s, err := SealEvent(context.Background(), e, k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, moved := range []Event{{Seq: 5, Type: EvToolResult, CallID: "a"}, {Seq: 4, Type: EvToolResult, CallID: "b"},
 		{Seq: 4, Type: EvToolStarted, CallID: "a"}} {
 		moved.Sealed = s.Sealed
-		if _, err := Open(context.Background(), moved, k1); !errors.Is(err, ErrCannotOpen) {
+		if _, err := OpenEvent(context.Background(), moved, k1); !errors.Is(err, ErrCannotOpen) {
 			t.Fatalf("a sealed payload replayed onto %+v must not open, got %v", moved, err)
 		}
 	}
@@ -158,7 +158,7 @@ func TestSealOpenRoundTripsEveryContentField(t *testing.T) {
 		System: "s", Task: "t", Message: &Message{Role: RoleAssistant, Content: Str("hi"),
 			ToolCalls: []ToolCall{{ID: "c", Type: "function", Function: FunctionCall{Name: "pay", Arguments: sealedArgs}}}},
 		Args: "a", Result: "r", Summary: "{}", Text: "x", Reason: "why", Decision: "approved"}
-	s, err := Seal(context.Background(), e, k1)
+	s, err := SealEvent(context.Background(), e, k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,14 +168,14 @@ func TestSealOpenRoundTripsEveryContentField(t *testing.T) {
 	if s.Tool != "pay" || s.Key != "k" || s.By != "ops" || s.Decision != "approved" {
 		t.Fatal("the audit fields must stay plain")
 	}
-	o, err := Open(context.Background(), s, k1)
+	o, err := OpenEvent(context.Background(), s, k1)
 	if err != nil || !reflect.DeepEqual(o, e) {
 		t.Fatalf("round trip changed the event:\n got %+v\nwant %+v (err %v)", o, e, err)
 	}
-	if _, err := Seal(context.Background(), s, k1); err == nil {
+	if _, err := SealEvent(context.Background(), s, k1); err == nil {
 		t.Fatal("sealing twice must fail")
 	}
-	if n, err := Seal(context.Background(), Event{Seq: 1, Type: EvToolStarted, CallID: "c"}, k1); err != nil || n.Sealed != "" {
+	if n, err := SealEvent(context.Background(), Event{Seq: 1, Type: EvToolStarted, CallID: "c"}, k1); err != nil || n.Sealed != "" {
 		t.Fatal("an event with no content needs no seal")
 	}
 }

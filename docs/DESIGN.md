@@ -130,10 +130,10 @@ An adapter turns the conversation into a request and the response into a `Decisi
 Coverage of the core package is 97.2%. The rest falls into three groups; anything not on this list that carries a rule has a test.
 
 **Can't fail by construction** (forcing it would need fault hooks in production code for things that can't happen):
-- `json.Marshal` / `json.Unmarshal` of values this code just built or already validated: in `Canonical`, `Journal.Append`, `Seal`, `RedactFields`, `maskKeys`, `schemaOf`, `idempotentFuncTool.Identity`;
+- `json.Marshal` / `json.Unmarshal` of values this code just built or already validated: in `Canonical`, `Journal.Append`, `SealEvent`, `RedactFields`, `maskKeys`, `schemaOf`, `idempotentFuncTool.Identity`;
 - `crypto/rand` failing (`AESGCM.Seal`), and `aes.NewCipher` on a key whose length was just checked;
 - a `big.Rat` that can't parse a number the JSON decoder already accepted (`canonicalNumber`), and the non-decimal fallback in `decimalText`;
-- `default:` branches of switches over closed sets (`compare.go` kinds, `Runner.loop` statuses, `trace.Trace.Tree` span names) and an upgrade step failing (`Upgrade`: every step is the identity today; the first real one comes with its own tests).
+- `default:` branches of switches over closed sets (`reconcile` value kinds, `Runner.loop` statuses, `trace.Trace.Tree` span names) and an upgrade step failing (`Upgrade`: every step is the identity today; the first real one comes with its own tests).
 
 **Reachable, untested, low risk** (each returns the error, and nothing acts):
 - operating-system errors other than those tested: `stat`/`open`/read failing with something other than "not found", and the blocking lock failing (`fileStore`); releasing a lease failing (only logged);

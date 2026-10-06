@@ -62,7 +62,7 @@ func (j *Journal) Append(ctx context.Context, e Event) error {
 	e.Seq, e.Time, e.Prev = j.next, time.Now().UTC(), j.prev
 	if j.Codec != nil {
 		var err error
-		if e, err = Seal(ctx, e, j.Codec); err != nil {
+		if e, err = SealEvent(ctx, e, j.Codec); err != nil {
 			return err
 		}
 	}
@@ -86,7 +86,7 @@ func (j *Journal) Read(ctx context.Context) ([]Event, error) {
 		return nil, err
 	}
 	for i := range events {
-		if events[i], err = Open(ctx, events[i], j.Codec); err != nil {
+		if events[i], err = OpenEvent(ctx, events[i], j.Codec); err != nil {
 			return nil, err
 		}
 	}

@@ -53,7 +53,7 @@ func TestCodecFailures(t *testing.T) {
 			t.Errorf("%s: must not open", name)
 		}
 	}
-	if _, err := Open(ctx, Event{Sealed: "!!not base64!!"}, k1); !errors.Is(err, ErrCannotOpen) {
+	if _, err := OpenEvent(ctx, Event{Sealed: "!!not base64!!"}, k1); !errors.Is(err, ErrCannotOpen) {
 		t.Errorf("a sealed field that isn't base64 must be ErrCannotOpen: %v", err)
 	}
 }

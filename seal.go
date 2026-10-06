@@ -60,9 +60,9 @@ func aadOf(e Event) []byte {
 	return fmt.Appendf(nil, "agentsafe/sealed/%d/%s/%s", e.Seq, e.Type, e.CallID)
 }
 
-// Seal moves e's content into e.Sealed, encrypted by c. Seq, Type and CallID must be final (they're
+// SealEvent moves e's content into e.Sealed, encrypted by c. Seq, Type and CallID must be final (they're
 // authenticated). Storage backends call it before writing; an event with no content is left as it is.
-func Seal(ctx context.Context, e Event, c Codec) (Event, error) {
+func SealEvent(ctx context.Context, e Event, c Codec) (Event, error) {
 	if e.Sealed != "" {
 		return e, errors.New("agentsafe: event is already sealed")
 	}
@@ -84,8 +84,8 @@ func Seal(ctx context.Context, e Event, c Codec) (Event, error) {
 	return e, nil
 }
 
-// Open restores a sealed event's content. An unsealed event is returned as it is.
-func Open(ctx context.Context, e Event, c Codec) (Event, error) {
+// OpenEvent restores a sealed event's content. An unsealed event is returned as it is.
+func OpenEvent(ctx context.Context, e Event, c Codec) (Event, error) {
 	if e.Sealed == "" {
 		return e, nil
 	}
