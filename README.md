@@ -1,14 +1,99 @@
 # agentsafe
 
-> **Status: pre-1.0, not yet production-ready.** The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md) (currently 20/100).
+> **Status: pre-1.0.** The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
 
 ```bash
 go get github.com/Ashutosh2308Bhardwaj/agentsafe
 ```
 
-**Correctness primitives for LLM agents that act on money.** Idempotent tool execution, durable resume, human approval gates, pre-write validation, and reconciliation of what the agent claimed against what actually happened. Go, standard library only.
+**Correctness primitives for LLM agents that act on money.** Idempotent tool execution, durable resume, human approval gates, pre-write validation, and reconciliation of what the agent claimed against what actually happened. Go; the core uses the standard library only, and storage backends and model adapters are separate modules.
 
 I own a payouts platform that disburses ₹400M a month to 40,000+ people. The failure I've spent the most time on is the gateway timeout that arrives *after* the money moved. I wanted to know what that failure looks like when the caller is an LLM agent, so I built an agent, broke it deliberately, wrote down every failure I saw, and built this library from that list. Nothing in it is speculative: every primitive answers a failure I reproduced, and every guarantee below is a test or a run you can repeat.
+
+## Quickstart (5 minutes, no API key)
+
+An agent that can pay an invoice **at most once**, and **only after a human approves**, surviving restarts in between:
+
+<!-- quickstart:start -->
+```go
+// Quickstart: an agent that can pay an invoice at most once, and only after a human approves.
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+)
+
+type Payout struct {
+	InvoiceID string            `json:"invoice_id"`
+	Amount    agentsafe.Decimal `json:"amount"`
+}
+
+// sendPayout is your code. KeyFrom(ctx) is the operation's idempotency key: give it to your payment
+// provider, and a retry after a crash or a timeout can't pay twice.
+func sendPayout(ctx context.Context, p Payout) (string, error) {
+	_ = agentsafe.KeyFrom(ctx)
+	fmt.Println("paying", p.InvoiceID, p.Amount)
+	return "paid", nil
+}
+
+func main() {
+	ctx := context.Background()
+	pay := agentsafe.Func("send_payout", "Pay an approved invoice", sendPayout,
+		agentsafe.Idempotent("invoice_id"),                       // once per invoice, ever
+		agentsafe.NeedsApproval(func(p Payout) any { return p })) // a human decides first
+
+	// An offline stand-in for the model. For Claude: anthropic.New(sdk.NewClient()).
+	model := &agentsafe.ScriptedModel{Final: "INV-1 paid.", Plan: []agentsafe.FunctionCall{
+		{Name: "send_payout", Arguments: `{"invoice_id":"INV-1","amount":"4200.50"}`}}}
+
+	r, err := agentsafe.New(model, &agentsafe.FileLog{Path: "payout-run.jsonl"},
+		agentsafe.WithTools(pay), agentsafe.WithAuthorizer(agentsafe.AllowList("you@example.com")))
+	must(err)
+
+	if len(os.Args) > 1 && os.Args[1] == "approve" {
+		st, err := r.Continue(ctx) // rebuilt from the log: a new process knows what's waiting
+		must(err)
+		if st.Waiting == nil {
+			fmt.Println("nothing to approve; the run is", st.Status)
+			return
+		}
+		st, err = r.Approve(ctx, st.Waiting.Key, "you@example.com")
+		must(err)
+		fmt.Println(st.Status, "-", st.Text)
+		return
+	}
+	st, err := r.Start(ctx, "You pay approved invoices.", "Pay invoice INV-1.")
+	must(err)
+	fmt.Printf("%s: %s\napprove it, now or after a reboot: go run . approve\n", st.Status, st.Waiting.Summary)
+}
+
+func must(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
+```
+<!-- quickstart:end -->
+
+```console
+$ go run .
+awaiting_approval: {"invoice_id":"INV-1","amount":"4200.50"}
+approve it, now or after a reboot: go run . approve
+
+$ go run . approve          # a new process: it finds the waiting payout in the log
+paying INV-1 4200.50
+finished - INV-1 paid.
+
+$ go run . approve          # again: nothing is paid twice
+nothing to approve; the run is finished
+```
+
+To use a real model, replace the `ScriptedModel` with `anthropic.New(sdk.NewClient())` (`go get github.com/Ashutosh2308Bhardwaj/agentsafe/anthropic`), `gemini.New(client, model)`, or `&agentsafe.OpenAICompatible{...}` for Groq, OpenAI, Ollama or vLLM. Then add `agentsafe.Check(...)` to ground arguments against your data before anyone is asked to approve, and `agentsafe.Reconcile` to check the run against your systems of record. This exact program is [examples/quickstart](examples/quickstart), and CI runs it as three processes.
 
 ## What goes wrong when the caller is a model
 
@@ -26,9 +111,9 @@ The model can't tell "failed" from "succeeded but unconfirmed", and it isn't its
 ## The primitives
 
 ```go
-r := &agentsafe.Runner{Model: model, Tools: tools, Log: &agentsafe.FileLog{Path: "run.jsonl"}, MaxSteps: 12,
-	StartedBy:  "scheduler",                                                      // who asked for the run
-	Authorizer: agentsafe.All(agentsafe.AllowList("ops@company"), agentsafe.NotRequester())} // who may decide
+r, err := agentsafe.New(model, &agentsafe.FileLog{Path: "run.jsonl"}, agentsafe.WithTools(tools...),
+	agentsafe.WithStartedBy("scheduler"), // who asked for the run
+	agentsafe.WithAuthorizer(agentsafe.All(agentsafe.AllowList("ops@company"), agentsafe.NotRequester()))) // who may decide
 st, err := r.Start(ctx, system, task)     // or r.Continue(ctx) after a crash, in any process
 r.Approve(ctx, key, "ops@company")         // a gated call waits durably until someone ALLOWED decides
 rep := agentsafe.Reconcile(expected, actual, events, claims)   // did it do what it claimed?
