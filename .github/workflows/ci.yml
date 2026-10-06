@@ -53,19 +53,47 @@ jobs:
         with: { go-version: "${{ matrix.go }}", cache-dependency-path: sqlite/go.sum }
       - run: go vet ./...
       - run: go test -race -count=1 ./...
+  postgres:
+    # Service containers only run on Linux runners; the backend is network code, the same on every OS.
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [oldstable, stable]
+        pg: ["14", "17"] # the oldest and newest Postgres versions we support
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}
+        env: { POSTGRES_USER: agentsafe, POSTGRES_PASSWORD: agentsafe, POSTGRES_DB: agentsafe_test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U agentsafe" --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      AGENTSAFE_POSTGRES_URL: postgres://agentsafe:agentsafe@localhost:5432/agentsafe_test?sslmode=disable
+      AGENTSAFE_REQUIRE_POSTGRES: "1" # fail, don't skip, if the database isn't there
+    defaults: { run: { working-directory: postgres } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ matrix.go }}", cache-dependency-path: postgres/go.sum }
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
   backends-quality:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [sqlite, postgres]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: stable, cache-dependency-path: sqlite/go.sum }
+        with: { go-version: stable, cache-dependency-path: "${{ matrix.module }}/go.sum" }
       - uses: golangci/golangci-lint-action@v8
-        with: { version: latest, working-directory: sqlite, args: --config ../.golangci.yml }
+        with: { version: latest, working-directory: "${{ matrix.module }}", args: --config ../.golangci.yml }
       - name: staticcheck
-        working-directory: sqlite
+        working-directory: ${{ matrix.module }}
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - name: govulncheck
-        working-directory: sqlite
+        working-directory: ${{ matrix.module }}
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
   crash-harness:
     runs-on: ubuntu-latest
