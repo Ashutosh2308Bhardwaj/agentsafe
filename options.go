@@ -108,6 +108,9 @@ func (r *Runner) Validate() error {
 			bad("two tools are named %q", name)
 		}
 		seen[name] = true
+		if c, ok := t.(interface{ configErr() error }); ok && c.configErr() != nil {
+			errs = append(errs, c.configErr())
+		}
 		if _, ok := t.(Gated); ok {
 			gated = true
 			if _, ok := t.(IdempotentTool); !ok {

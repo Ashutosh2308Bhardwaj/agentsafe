@@ -40,13 +40,13 @@ func (p *PanicError) Error() string { return fmt.Sprintf("tool %s panicked: %v",
 // Is makes errors.Is(p, ErrOutcomeUnknown) true.
 func (p *PanicError) Is(target error) bool { return target == ErrOutcomeUnknown }
 
-// TimeoutTool lets a tool set its own per-call timeout, overriding Runner.ToolTimeout.
+// TimeoutTool lets a tool set its own per-call timeout, overriding Runner.ToolTimeout. 0 = the Runner's.
 type TimeoutTool interface {
 	Timeout() time.Duration
 }
 
 func (r *Runner) timeoutFor(tool Tool) time.Duration {
-	if t, ok := tool.(TimeoutTool); ok {
+	if t, ok := tool.(TimeoutTool); ok && t.Timeout() > 0 {
 		return t.Timeout()
 	}
 	return r.ToolTimeout
