@@ -2,9 +2,9 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 21 / 35 → 60 / 100** (after step 4.3, Anthropic adapter)
+**Current: 22 / 35 → 63 / 100** (after step 4.4, Gemini adapter)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63
 
 ## Correctness (2/5)
 - [x] `go test -race` clean on every package
@@ -33,12 +33,12 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [ ] OpenSSF Scorecard ≥ 8 (needs the public repo, branch protection, pinned actions, SECURITY.md)
 - [x] CI green on Linux, macOS and Windows × Go 1.23 and stable
 
-## Integration (4/7)
+## Integration (5/7)
 - [x] Idiomatic API: context everywhere, functional options, `errors.Is`-able sentinel errors: every I/O call takes a ctx (Log, Locker, Journal, Codec; storetest checks a cancelled append stores nothing); `New(model, log, opts...)` validates the whole setup at once (`ErrConfig`); every error a caller may act on is a sentinel (`errors.go`, `TestSentinelErrors`)
 - [x] Tool middleware that wraps any existing tool function: `Func(name, desc, fn, Idempotent(...), NeedsApproval(...), Check(...), Timeout(...))`, schema generated from the input struct, strict decoding, key passed via `KeyFrom(ctx)`; `tooltest.SameKey` checks users' own tools for check-then-act races
 - [x] Model adapter: OpenAI-compatible (Groq, OpenAI, Ollama, vLLM, …)
 - [x] Model adapter: Anthropic: `agentsafe/anthropic` on the official Go SDK; assistant turns stored verbatim (`Message.Native`) so a resumed run replays Claude's thinking blocks byte for byte; a fake Messages API that enforces append-only history proves it across an approval pause, a restart and a crash
-- [ ] Model adapter: Gemini
+- [x] Model adapter: Gemini: `agentsafe/gemini` on the official Go SDK (stateless generateContent, so the history lives in agentsafe's log); model turns replayed verbatim with their thought signatures; deterministic ids for calls Gemini sends without one, never sent back; same fake-API journey as Claude (approval pause, restart, crash)
 - [ ] Runnable `Example` functions on pkg.go.dev for every primitive
 - [ ] 5-minute quickstart in the README
 

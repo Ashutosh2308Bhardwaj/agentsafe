@@ -45,7 +45,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: [oldstable, stable]
-        module: [sqlite, anthropic]
+        module: [sqlite, anthropic, gemini]
     runs-on: ${{ matrix.os }}
     defaults: { run: { working-directory: "${{ matrix.module }}" } }
     steps:
@@ -82,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [sqlite, postgres, anthropic]
+        module: [sqlite, postgres, anthropic, gemini]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

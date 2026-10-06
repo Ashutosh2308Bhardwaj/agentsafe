@@ -23,7 +23,7 @@ step "crash harness";  scripts/money_sweep.sh >/dev/null
 step "crash harness (sealed log)"; AGENTSAFE_LOG_KEY=4242424242424242424242424242424242424242424242424242424242424242 scripts/money_sweep.sh >/dev/null
 # Backend modules: their own go.mod and minimum Go (the go command fetches that toolchain if needed).
 [ -n "${AGENTSAFE_POSTGRES_URL:-}" ] || printf '\n!! AGENTSAFE_POSTGRES_URL is not set: the postgres tests will SKIP (CI runs them)\n'
-for m in sqlite postgres anthropic; do
+for m in sqlite postgres anthropic gemini; do
   step "backend $m: vet, lint, staticcheck, govulncheck, tests (race)"
   # Built and linted with the module's own toolchain (GOTOOLCHAIN=auto reads go.mod); scanned for
   # vulnerabilities against the latest release, like the core.
