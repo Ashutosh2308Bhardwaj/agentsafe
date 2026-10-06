@@ -99,6 +99,7 @@ func Rebuild(events []Event) (State, error) {
 //   - anything at all after run_finished
 //   - tool_started for a call whose approval is pending or was rejected (the gate can't be skipped)
 //   - tool_refused for a call that was already started (it may have run: that needs a tool_result)
+//   - approval_requested for an operation already rejected in this run (a rejection can't be undone by asking again)
 func (s *State) Apply(e Event) error {
 	if e.Sealed != "" {
 		return fmt.Errorf("%w (event %d)", ErrSealed, e.Seq)
@@ -215,6 +216,9 @@ func (s *State) apply(e Event) error {
 		}
 		if e.Key == "" {
 			return fmt.Errorf("approval_requested without an operation key")
+		}
+		if s.ByKey[e.Key] == "rejected" {
+			return fmt.Errorf("approval_requested for operation %s, which was already rejected in this run", e.Key)
 		}
 		s.Approvals[e.CallID], s.ByKey[e.Key] = "requested", "requested"
 		s.Waiting = &Waiting{CallID: e.CallID, Key: e.Key, Tool: e.Tool, Summary: e.Summary}

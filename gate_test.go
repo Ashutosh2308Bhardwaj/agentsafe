@@ -169,3 +169,26 @@ func TestGateCannotBeSkippedInTheLog(t *testing.T) {
 		t.Fatalf("starting a rejected call must be refused, got %v", err)
 	}
 }
+
+// The model retries a rejected payout under a new call id (FAILURES.md: "it retries under a new identity").
+// It's the same operation, so it's refused without asking the human again, and nothing is paid.
+func TestRejectedOperationIsNotAskedAgain(t *testing.T) {
+	r, tool := payRun(t, `{"ref":"T1007","amount":11000}`, `{"ref":"T1007","amount":11000}`)
+	st, _ := r.Start(context.Background(), "sys", "task")
+	st, err := r.Reject(context.Background(), st.Waiting.Key, "ops@test", "payee disputes it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Status != StatusFinished || tool.paid != 0 {
+		t.Fatalf("the re-proposal must be refused without a second approval request: status=%s paid=%d", st.Status, tool.paid)
+	}
+	events, _ := r.Log.Read(context.Background())
+	requests, refusedAgain := 0, false
+	for _, e := range events {
+		requests += map[bool]int{true: 1}[e.Type == EvApprovalRequested]
+		refusedAgain = refusedAgain || (e.Type == EvToolRefused && strings.Contains(e.Result, "rejected by a human approver earlier in this run"))
+	}
+	if requests != 1 || !refusedAgain {
+		t.Fatalf("one approval request, then an automatic refusal: requests=%d refusedAgain=%v", requests, refusedAgain)
+	}
+}

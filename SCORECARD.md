@@ -2,14 +2,14 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 25 / 35 → 71 / 100** (after step 5.1, fuzzing)
+**Current: 26 / 35 → 74 / 100** (after step 5.2, property tests)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71 → 5.2 property tests 74
 
-## Correctness (3/5)
+## Correctness (4/5)
 - [x] `go test -race` clean on every package
 - [x] Fuzz tests: log reader, `Rebuild`, `Canonical`: 7 targets (`fuzz_test.go`: log reading + torn tails, Rebuild, Canonical exactness and stability, sealed payloads, Same, wrapped tools' arguments), each fuzzed 30s per CI run; found a real key collision in `Canonical` (numbers above 2^53), fixed without changing any other key
-- [ ] Property-based tests on the state machine (random event sequences: valid histories rebuild, invalid ones are rejected)
+- [x] Property-based tests on the state machine (random event sequences: valid histories rebuild, invalid ones are rejected): `prop_test.go`: random legal histories and all their prefixes rebuild with invariants after every event; 8 corruption classes always refused (with a guard that each actually occurs); the real runner under random plans, decisions and crashes never pays a key twice or pays a rejected one. Found: a rejected payout re-proposed by the model was put to the human again and could be approved; now refused automatically, and invalid in the log
 - [ ] Coverage ≥ 90% of the core package (baseline 71.8%, now 78.2%)
 - [x] Crash harness (`scripts/money_sweep.sh`: kill -9 at 8 points, reconciled) exits non-zero on failure, wired into CI
 

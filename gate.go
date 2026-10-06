@@ -90,6 +90,15 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 	if key == "" {
 		return false, fmt.Errorf("%w: gated tool %s must be an IdempotentTool: approvals are addressed by operation key", ErrConfig, c.Function.Name)
 	}
+	if st.ByKey[key] == "rejected" {
+		// The model re-proposed an operation a human already rejected in this run (a new call id, the same
+		// operation: FAILURES.md "it retries under a new identity"). A decision belongs to the operation, so
+		// it's refused without asking again: re-asking until someone approves is how a rejection gets undone.
+		// Found by TestPropertyRunnerUnderRandomCrashesPaysAtMostOnce.
+		res := errorJSON(fmt.Errorf("this operation was rejected by a human approver earlier in this run; nothing was done. Don't propose it again"))
+		r.logf("    ✗ %s: operation %s was already rejected; refused without asking again", c.Function.Name, key)
+		return false, r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
+	}
 	sum, err := g.Summary(args)
 	if err != nil {
 		return false, err
