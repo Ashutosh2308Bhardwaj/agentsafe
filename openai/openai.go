@@ -1,4 +1,12 @@
-package agentsafe
+// Package openai is an agentsafe.Model for any OpenAI-compatible /chat/completions API: OpenAI, Groq,
+// Ollama, vLLM, Together, Fireworks, ...
+//
+//	m := &openai.Model{BaseURL: "https://api.groq.com/openai/v1", APIKey: os.Getenv("GROQ_API_KEY"),
+//		Model: "openai/gpt-oss-120b"}
+//	r, err := agentsafe.New(m, log, agentsafe.WithTools(...))
+//
+// It has no dependencies beyond the standard library, so it lives in the core module.
+package openai
 
 import (
 	"bytes"
@@ -11,12 +19,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
 
-// OpenAICompatible is a Model for any /chat/completions API (Groq, OpenAI, Ollama, vLLM, ...).
+// Model calls a /chat/completions API.
 // Plain net/http on purpose: timeouts and retries are explicit here, never inherited from an SDK's
 // defaults (week 1 F2: one SDK had no timeout, another retried twice silently).
-type OpenAICompatible struct {
+type Model struct {
 	BaseURL     string // e.g. https://api.groq.com/openai/v1
 	APIKey      string
 	Model       string // e.g. openai/gpt-oss-120b
@@ -28,26 +38,26 @@ type OpenAICompatible struct {
 }
 
 type chatRequest struct {
-	Model    string     `json:"model"`
-	Messages []Message  `json:"messages"`
-	Tools    []chatTool `json:"tools,omitempty"`
+	Model    string              `json:"model"`
+	Messages []agentsafe.Message `json:"messages"`
+	Tools    []chatTool          `json:"tools,omitempty"`
 }
 
 type chatTool struct {
-	Type     string   `json:"type"`
-	Function ToolSpec `json:"function"`
+	Type     string             `json:"type"`
+	Function agentsafe.ToolSpec `json:"function"`
 }
 
 type chatResponse struct {
 	Choices []struct {
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
+		Message      agentsafe.Message `json:"message"`
+		FinishReason string            `json:"finish_reason"`
 	} `json:"choices"`
-	Usage Usage `json:"usage"`
+	Usage agentsafe.Usage `json:"usage"`
 }
 
 // Describe implements Describer. The provider is the host part of BaseURL's API (best effort, for traces).
-func (m *OpenAICompatible) Describe() (string, string) {
+func (m *Model) Describe() (string, string) {
 	for _, known := range []string{"groq", "openai", "anthropic", "mistral", "ollama", "together", "fireworks"} {
 		if strings.Contains(m.BaseURL, known) {
 			return known, m.Model
@@ -57,8 +67,8 @@ func (m *OpenAICompatible) Describe() (string, string) {
 }
 
 // Decide implements Model.
-func (m *OpenAICompatible) Decide(ctx context.Context, messages []Message, tools []ToolSpec) (Decision, error) {
-	wire := make([]Message, len(messages))
+func (m *Model) Decide(ctx context.Context, messages []agentsafe.Message, tools []agentsafe.ToolSpec) (agentsafe.Decision, error) {
+	wire := make([]agentsafe.Message, len(messages))
 	for i, msg := range messages {
 		msg.Native = nil // another provider's form: not part of the OpenAI wire format
 		wire[i] = msg
@@ -69,7 +79,7 @@ func (m *OpenAICompatible) Decide(ctx context.Context, messages []Message, tools
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return Decision{}, err
+		return agentsafe.Decision{}, err
 	}
 	attempts := m.MaxAttempts
 	if attempts == 0 {
@@ -86,7 +96,7 @@ func (m *OpenAICompatible) Decide(ctx context.Context, messages []Message, tools
 		m.pace(ctx)
 		hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, m.BaseURL+"/chat/completions", bytes.NewReader(body))
 		if err != nil {
-			return Decision{}, err
+			return agentsafe.Decision{}, err
 		}
 		hreq.Header.Set("Content-Type", "application/json")
 		hreq.Header.Set("Authorization", "Bearer "+m.APIKey)
@@ -105,25 +115,25 @@ func (m *OpenAICompatible) Decide(ctx context.Context, messages []Message, tools
 		case resp.StatusCode == http.StatusOK:
 			var cr chatResponse
 			if err := json.Unmarshal(raw, &cr); err != nil {
-				return Decision{}, fmt.Errorf("decode response: %w", err)
+				return agentsafe.Decision{}, fmt.Errorf("decode response: %w", err)
 			}
 			if len(cr.Choices) == 0 {
-				return Decision{}, fmt.Errorf("response has no choices: %.200s", raw)
+				return agentsafe.Decision{}, fmt.Errorf("response has no choices: %.200s", raw)
 			}
-			return Decision{Message: cr.Choices[0].Message, FinishReason: cr.Choices[0].FinishReason, Usage: cr.Usage}, nil
+			return agentsafe.Decision{Message: cr.Choices[0].Message, FinishReason: cr.Choices[0].FinishReason, Usage: cr.Usage}, nil
 		case resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500:
 			lastErr = fmt.Errorf("HTTP %d: %.200s", resp.StatusCode, raw)
 			m.backoff(ctx, attempt, attempts, fmt.Sprintf("HTTP %d", resp.StatusCode), resp.Header)
 		default: // 4xx: our request is wrong; retrying can't help
-			return Decision{}, fmt.Errorf("HTTP %d: %.300s", resp.StatusCode, raw)
+			return agentsafe.Decision{}, fmt.Errorf("HTTP %d: %.300s", resp.StatusCode, raw)
 		}
 	}
-	return Decision{}, fmt.Errorf("gave up after %d attempts: %w", attempts, lastErr)
+	return agentsafe.Decision{}, fmt.Errorf("gave up after %d attempts: %w", attempts, lastErr)
 }
 
 // backoff sleeps before the next attempt: the server's Retry-After if it sent one (week 1 F4), else
 // exponential with jitter. It logs every retry: a retry you can't see is a duplicate you can't see.
-func (m *OpenAICompatible) backoff(ctx context.Context, attempt, attempts int, why string, h http.Header) {
+func (m *Model) backoff(ctx context.Context, attempt, attempts int, why string, h http.Header) {
 	if attempt == attempts {
 		return
 	}
@@ -140,7 +150,7 @@ func (m *OpenAICompatible) backoff(ctx context.Context, attempt, attempts int, w
 
 // pace waits for the per-minute token window to reset if the last response said it's nearly spent,
 // instead of sending a request we know will be rejected (week 1 F4). Groq sends these headers.
-func (m *OpenAICompatible) pace(ctx context.Context) {
+func (m *Model) pace(ctx context.Context) {
 	if m.limits == nil {
 		return
 	}
@@ -156,7 +166,7 @@ func (m *OpenAICompatible) pace(ctx context.Context) {
 	sleep(ctx, wait)
 }
 
-func (m *OpenAICompatible) logf(f string, a ...any) {
+func (m *Model) logf(f string, a ...any) {
 	if m.Logf != nil {
 		m.Logf(f, a...)
 	}
@@ -170,3 +180,6 @@ func sleep(ctx context.Context, d time.Duration) {
 	case <-t.C:
 	}
 }
+
+var _ agentsafe.Model = (*Model)(nil)
+var _ agentsafe.Describer = (*Model)(nil)

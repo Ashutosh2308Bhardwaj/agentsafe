@@ -6,6 +6,21 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Breaking
+
+The core package is split so each part can be found and used on its own. To migrate:
+
+| v0.1.0 | now |
+|---|---|
+| `agentsafe.OpenAICompatible{...}` | `openai.Model{...}` (`github.com/Ashutosh2308Bhardwaj/agentsafe/openai`), same fields |
+
+### Changed
+
+- A `Runner` written as a struct literal is validated like one built with `New`, before it reads or writes
+  anything; a run whose gated tools nobody may approve is now refused at `Start` (`ErrConfig` wrapping
+  `ErrNoAuthorizer`) instead of at its first decision.
+- `Reconcile` reports findings of equal severity in a stable order.
+
 ## [0.1.0] - 2026-10-06
 
 The first release: correctness primitives for LLM agents that act on money, hardened from a four-week study of how real models fail (see [docs/FAILURES.md](docs/FAILURES.md)).

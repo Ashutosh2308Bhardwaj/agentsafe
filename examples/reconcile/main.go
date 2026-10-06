@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	"github.com/Ashutosh2308Bhardwaj/agentsafe/openai"
 )
 
 const system = "You reconcile our payout ledger against the bank's settlement file.\n" +
@@ -63,7 +64,7 @@ func main() {
 		if key == "" {
 			die(errors.New("GROQ_API_KEY not set (or use -mock)"))
 		}
-		model = &agentsafe.OpenAICompatible{BaseURL: "https://api.groq.com/openai/v1", APIKey: key,
+		model = &openai.Model{BaseURL: "https://api.groq.com/openai/v1", APIKey: key,
 			Model: "openai/gpt-oss-120b", Logf: logf}
 	}
 

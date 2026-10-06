@@ -1,4 +1,4 @@
-package agentsafe
+package openai
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
 
 // fakeChat is a /chat/completions endpoint that answers from a script of (status, headers, body).
@@ -53,22 +55,22 @@ func (f *fakeChat) requests() int {
 const okToolCall = `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function",
 "function":{"name":"pay","arguments":"{\"ref\":\"T1\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`
 
-func chatModel(t *testing.T, replies ...fakeReply) (*OpenAICompatible, *fakeChat, *[]string) {
+func chatModel(t *testing.T, replies ...fakeReply) (*Model, *fakeChat, *[]string) {
 	t.Helper()
 	f := &fakeChat{replies: replies}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	var logs []string
 	var mu sync.Mutex
-	return &OpenAICompatible{BaseURL: srv.URL, APIKey: "sk-test", Model: "m", Timeout: 5 * time.Second,
+	return &Model{BaseURL: srv.URL, APIKey: "sk-test", Model: "m", Timeout: 5 * time.Second,
 		Logf: func(format string, a ...any) { mu.Lock(); logs = append(logs, fmt.Sprintf(format, a...)); mu.Unlock() }}, f, &logs
 }
 
 func TestOpenAIDecideParsesAToolCallAndNeverSendsNative(t *testing.T) {
 	m, f, _ := chatModel(t, fakeReply{status: 200, body: okToolCall})
-	msgs := []Message{{Role: RoleSystem, Content: Str("sys")}, {Role: RoleUser, Content: Str("pay T1")},
-		{Role: RoleAssistant, Content: Str("earlier"), Native: json.RawMessage(`{"claude":"thinking blocks"}`)}}
-	d, err := m.Decide(context.Background(), msgs, []ToolSpec{{Name: "pay", Description: "pay", Parameters: json.RawMessage(`{"type":"object"}`)}})
+	msgs := []agentsafe.Message{{Role: agentsafe.RoleSystem, Content: agentsafe.Str("sys")}, {Role: agentsafe.RoleUser, Content: agentsafe.Str("pay T1")},
+		{Role: agentsafe.RoleAssistant, Content: agentsafe.Str("earlier"), Native: json.RawMessage(`{"claude":"thinking blocks"}`)}}
+	d, err := m.Decide(context.Background(), msgs, []agentsafe.ToolSpec{{Name: "pay", Description: "pay", Parameters: json.RawMessage(`{"type":"object"}`)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +131,7 @@ func TestOpenAINetworkError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close() // nothing listening
-	m := &OpenAICompatible{BaseURL: url, MaxAttempts: 1}
+	m := &Model{BaseURL: url, MaxAttempts: 1}
 	if _, err := m.Decide(context.Background(), nil, nil); err == nil || !strings.Contains(err.Error(), "gave up after 1 attempts") {
 		t.Fatalf("want a network error, got %v", err)
 	}
@@ -173,7 +175,7 @@ func TestOpenAICancelledDuringBackoffReturnsPromptly(t *testing.T) {
 
 func TestOpenAIDescribe(t *testing.T) {
 	for url, want := range map[string]string{"https://api.groq.com/openai/v1": "groq", "http://localhost:11434/v1": "openai_compatible"} {
-		if p, model := (&OpenAICompatible{BaseURL: url, Model: "m"}).Describe(); p != want || model != "m" {
+		if p, model := (&Model{BaseURL: url, Model: "m"}).Describe(); p != want || model != "m" {
 			t.Errorf("%s -> %s %s", url, p, model)
 		}
 	}

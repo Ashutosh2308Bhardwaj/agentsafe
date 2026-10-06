@@ -14,7 +14,7 @@ import (
 )
 
 // The examples run offline: ScriptedModel stands in for a real model (agentsafe/anthropic, agentsafe/gemini,
-// or OpenAICompatible), proposing the tool calls a model would.
+// or agentsafe/openai), proposing the tool calls a model would.
 
 type Invoice struct {
 	InvoiceID string            `json:"invoice_id" desc:"the invoice being paid"`

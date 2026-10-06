@@ -138,7 +138,7 @@ Coverage of the core package is 97.2%. The rest falls into three groups; anythin
 **Reachable, untested, low risk** (each returns the error, and nothing acts):
 - operating-system errors other than those tested: `stat`/`open`/read failing with something other than "not found", and the blocking lock failing (`fileStore`); releasing a lease failing (only logged);
 - failing to log a refused approval (`Runner.authorize` returns both errors);
-- an invalid `BaseURL` or tool schema in `OpenAICompatible`; a custom `IdempotentTool` whose identity can't be canonicalized (`keyFor`); top-level struct fields skipped by `jsonFields`;
+- an invalid `BaseURL` or tool schema in `openai.Model`; a custom `IdempotentTool` whose identity can't be canonicalized (`keyFor`); top-level struct fields skipped by `jsonFields`;
 - trace rendering helpers (`Tree` and OTLP formatting for values the runner never produces).
 
 **Timing-dependent**: in `invoke`, a tool's result arriving at the same instant as its timeout. Without that branch the call is retried with the same key, which is still safe; testing it deterministically isn't possible.
