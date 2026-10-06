@@ -23,8 +23,14 @@ step "crash harness";  scripts/money_sweep.sh >/dev/null
 step "crash harness (sealed log)"; AGENTSAFE_LOG_KEY=4242424242424242424242424242424242424242424242424242424242424242 scripts/money_sweep.sh >/dev/null
 # Backend modules: their own go.mod and minimum Go (the go command fetches that toolchain if needed).
 [ -n "${AGENTSAFE_POSTGRES_URL:-}" ] || printf '\n!! AGENTSAFE_POSTGRES_URL is not set: the postgres tests will SKIP (CI runs them)\n'
+# Each module is tested against THIS checkout's core through a throwaway workspace, not the released core its
+# go.mod requires (which stays as users see it).
+ws="$(mktemp -d)"
+trap 'rm -rf "${ws:?}"' EXIT
 for m in sqlite postgres anthropic gemini; do
   step "backend $m: vet, lint, staticcheck, govulncheck, tests (race)"
+  (cd "$ws" && rm -f go.work && GOTOOLCHAIN=auto go work init "$OLDPWD" "$OLDPWD/$m" >/dev/null)
+  export GOWORK="$ws/go.work"
   # Built and linted with the module's own toolchain (GOTOOLCHAIN=auto reads go.mod); scanned for
   # vulnerabilities against the latest release, like the core.
   (cd "$m" && export GOTOOLCHAIN=auto && go vet ./... && golangci-lint run --config ../.golangci.yml ./... \
@@ -32,4 +38,5 @@ for m in sqlite postgres anthropic gemini; do
     && GOTOOLCHAIN="${latest:-auto}" go run golang.org/x/vuln/cmd/govulncheck@latest ./... >/dev/null \
     && go test -race -count=1 ./...)
 done
+unset GOWORK
 printf '\nall gates green\n'

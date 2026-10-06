@@ -52,6 +52,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: "${{ matrix.go }}", cache-dependency-path: "${{ matrix.module }}/go.sum" }
+      - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
+        working-directory: .
+        shell: bash
+        run: go work init . "./${{ matrix.module }}"
       - run: go vet ./...
       - run: go test -race -count=1 ./...
   postgres:
@@ -76,6 +80,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: "${{ matrix.go }}", cache-dependency-path: postgres/go.sum }
+      - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
+        working-directory: .
+        shell: bash
+        run: go work init . ./postgres
       - run: go vet ./...
       - run: go test -race -count=1 ./...
   backends-quality:
@@ -88,6 +96,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: stable, cache-dependency-path: "${{ matrix.module }}/go.sum" }
+      - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
+        shell: bash
+        run: go work init . "./${{ matrix.module }}"
       - uses: golangci/golangci-lint-action@v8
         with: { version: latest, working-directory: "${{ matrix.module }}", args: --config ../.golangci.yml }
       - name: staticcheck
