@@ -122,12 +122,17 @@ func TestFailedWritesPoisonTheStore(t *testing.T) {
 
 func TestFailedRepairPoisonsTheStore(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "r.jsonl")
-	appendN(t, newFileStore(path), 1, 1)
-	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
-	_, _ = f.WriteString(`{"torn`)
-	_ = f.Close()
 	for name, fault := range map[string]faultyFile{"truncate": {failTruncate: true}, "sync": {failSync: true}, "close": {failClose: true}} {
+		// Each case gets its own torn log: a repair that half-succeeds (truncated, then fsync failed) would
+		// otherwise remove the torn tail the next case needs. (Map order is random: CI found this.)
+		path := filepath.Join(t.TempDir(), "r.jsonl")
+		appendN(t, newFileStore(path), 1, 1)
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = f.WriteString(`{"torn`)
+		_ = f.Close()
 		s := newFileStore(path)
 		faultOnce(s, fault)
 		if err := s.AppendLine(ctx, 2, line("x")); err == nil {
