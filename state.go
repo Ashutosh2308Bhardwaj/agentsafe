@@ -14,10 +14,16 @@ const (
 	StatusAnswered         Status = "answered"          // the model gave a final answer; run_finished not yet logged
 	StatusPaused           Status = "paused"            // out of budget: resumable only via an explicit budget_extended
 	StatusFinished         Status = "finished"          // done. Terminal: downstream may rely on "finished" meaning finished
+	StatusOpen             Status = "open"              // a proxy run, waiting for its next call (format v5)
 )
+
+// KindProxy is a run whose calls arrive from outside (Gateway: an MCP proxy, a sidecar) instead of from a
+// model. It has no model decisions, no budget and no final answer: it stays open, call after call.
+const KindProxy = "proxy"
 
 // State is the run as reconstructed from its events.
 type State struct {
+	Kind     string // "" for an agent run, KindProxy for a proxy run
 	Status   Status
 	Step     int        // model decisions so far
 	Messages []Message  // the conversation to send on the next model call
@@ -92,6 +98,12 @@ func Rebuild(events []Event) (State, error) {
 //	executing      --approval_requested-->          awaiting_approval
 //	awaiting_appr. --approval_decided-->            executing       (approved: may now start; rejected: must be refused)
 //
+// A proxy run (run_started with kind "proxy", format v5) has no model:
+//
+//	new            --run_started (proxy)-->         open
+//	open           --call_received-->               executing       (one call, from outside)
+//	executing      --tool_result | tool_refused-->  open
+//
 // Not allowed, by design:
 //   - run_finished while executing: every proposed call must have an outcome first (week 1 F14)
 //   - tool_result without tool_started: an outcome for something that was never attempted
@@ -101,6 +113,8 @@ func Rebuild(events []Event) (State, error) {
 //   - tool_started for a call whose approval is pending or was rejected (the gate can't be skipped)
 //   - tool_refused for a call that was already started (it may have run: that needs a tool_result)
 //   - approval_requested for an operation already rejected in this run (a rejection can't be undone by asking again)
+//   - model decisions, budgets or a final answer in a proxy run; call_received in an agent run
+//   - approvals in a proxy run, until they're designed for one (a call waiting must not stop the others)
 func (s *State) Apply(e Event) error {
 	if e.Sealed != "" {
 		return fmt.Errorf("%w (event %d)", ErrSealed, e.Seq)
@@ -125,6 +139,7 @@ var transitions = map[EventType]func(*State, Event) error{
 	EvRunPaused:         (*State).runPaused,
 	EvBudgetExtended:    (*State).budgetExtended,
 	EvRunFinished:       (*State).runFinished,
+	EvCallReceived:      (*State).callReceived,
 }
 
 func (s *State) apply(e Event) error {
@@ -144,11 +159,19 @@ func (s *State) runStarted(e Event) error {
 	if s.Status != StatusNew {
 		return fmt.Errorf("run_started in status %s", s.Status)
 	}
-	if e.MaxSteps <= 0 {
-		return fmt.Errorf("run_started without a budget (max_steps)")
-	}
 	if e.KeyBits != 64 && e.KeyBits != 128 && e.KeyBits != 256 {
 		return fmt.Errorf("run_started with key_bits %d (64, 128 or 256)", e.KeyBits)
+	}
+	switch e.Kind {
+	case KindProxy:
+		s.Kind, s.KeyBits, s.StartedBy, s.Status = KindProxy, e.KeyBits, e.By, StatusOpen
+		return nil
+	case "":
+	default:
+		return fmt.Errorf("run_started with unknown kind %q", e.Kind)
+	}
+	if e.MaxSteps <= 0 {
+		return fmt.Errorf("run_started without a budget (max_steps)")
 	}
 	s.Messages = []Message{{Role: RoleSystem, Content: Str(e.System)}, {Role: RoleUser, Content: Str(e.Task)}}
 	s.Budget, s.StartedBy, s.KeyBits = e.MaxSteps, e.By, e.KeyBits
@@ -218,7 +241,7 @@ func (s *State) toolResult(e Event) error {
 	if !s.Started[e.CallID] {
 		return fmt.Errorf("tool_result for %q with no tool_started", e.CallID)
 	}
-	s.Messages = append(s.Messages, Message{Role: RoleTool, ToolCallID: e.CallID, Content: Str(e.Result)})
+	s.answer(e.CallID, e.Result)
 	if e.Key != "" && !e.Replayed {
 		if _, dup := s.Effects[e.Key]; dup {
 			return fmt.Errorf("second executed result for idempotency key %s", e.Key)
@@ -228,7 +251,7 @@ func (s *State) toolResult(e Event) error {
 	s.removePending(e.CallID)
 	delete(s.Started, e.CallID)
 	if len(s.Pending) == 0 {
-		s.Status = StatusAwaitingModel
+		s.Status = s.idle()
 	}
 	return nil
 }
@@ -244,10 +267,10 @@ func (s *State) toolRefused(e Event) error {
 	if s.Started[e.CallID] {
 		return fmt.Errorf("tool_refused for %q, which was already started and may have run", e.CallID)
 	}
-	s.Messages = append(s.Messages, Message{Role: RoleTool, ToolCallID: e.CallID, Content: Str(e.Result)})
+	s.answer(e.CallID, e.Result)
 	s.removePending(e.CallID)
 	if len(s.Pending) == 0 {
-		s.Status = StatusAwaitingModel
+		s.Status = s.idle()
 	}
 	return nil
 }
@@ -262,6 +285,9 @@ func (s *State) approvalRequested(e Event) error {
 	}
 	if e.Key == "" {
 		return fmt.Errorf("approval_requested without an operation key")
+	}
+	if s.Kind == KindProxy {
+		return fmt.Errorf("approval_requested in a proxy run: not supported yet")
 	}
 	if s.ByKey[e.Key] == "rejected" {
 		return fmt.Errorf("approval_requested for operation %s, which was already rejected in this run", e.Key)
@@ -332,6 +358,37 @@ func (s *State) runFinished(e Event) error {
 		s.Text = e.Text
 	}
 	return nil
+}
+
+// callReceived applies call_received: a proxy run's next call, from outside. One at a time, like an agent's.
+func (s *State) callReceived(e Event) error {
+	if s.Kind != KindProxy {
+		return fmt.Errorf("call_received in an agent run")
+	}
+	if s.Status != StatusOpen {
+		return fmt.Errorf("call_received in status %s (pending calls: %d)", s.Status, len(s.Pending))
+	}
+	if e.CallID == "" || e.Tool == "" {
+		return fmt.Errorf("call_received needs a call_id and a tool")
+	}
+	s.Pending = []ToolCall{{ID: e.CallID, Type: "function", Function: FunctionCall{Name: e.Tool, Arguments: e.Args}}}
+	s.Status = StatusExecuting
+	return nil
+}
+
+// idle is the status once every pending call is resolved: an agent run asks its model, a proxy run waits.
+func (s *State) idle() Status {
+	if s.Kind == KindProxy {
+		return StatusOpen
+	}
+	return StatusAwaitingModel
+}
+
+// answer records a call's outcome in the conversation the model sees next. A proxy run has no conversation.
+func (s *State) answer(callID, result string) {
+	if s.Kind != KindProxy {
+		s.Messages = append(s.Messages, Message{Role: RoleTool, ToolCallID: callID, Content: Str(result)})
+	}
 }
 
 func (s *State) isPending(id string) bool {

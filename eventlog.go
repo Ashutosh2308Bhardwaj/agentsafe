@@ -25,6 +25,7 @@ const (
 	EvApprovalRequested EventType = "approval_requested" // a gated call is waiting for a human: the run is paused, durably
 	EvApprovalDecided   EventType = "approval_decided"   // approved or rejected, by whom, why
 	EvApprovalDenied    EventType = "approval_denied"    // a decision the Authorizer refused (format v2): who tried, and why not
+	EvCallReceived      EventType = "call_received"      // a proxy run (format v5): a call arrived from outside, e.g. an MCP client
 )
 
 // Event is one line of the log. Fields are used per type; the rest are omitted.
@@ -36,6 +37,7 @@ type Event struct {
 	Time time.Time `json:"time"`
 
 	// run_started
+	Kind     string `json:"kind,omitempty"` // "proxy" (v5): calls arrive from outside, not from a model; absent = an agent run
 	System   string `json:"system,omitempty"`
 	Task     string `json:"task,omitempty"`
 	MaxSteps int    `json:"max_steps,omitempty"` // the budget lives in the log, not in the runner's config
@@ -53,6 +55,9 @@ type Event struct {
 	Message      *Message `json:"message,omitempty"`
 	FinishReason string   `json:"finish_reason,omitempty"`
 	Usage        *Usage   `json:"usage,omitempty"`
+
+	// call_received (v5): who sent it, as the client reports itself (unverified: for audit display only)
+	Client string `json:"client,omitempty"`
 
 	// tool_started / tool_result
 	CallID string `json:"call_id,omitempty"`

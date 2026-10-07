@@ -14,7 +14,7 @@ import (
 //   - an optional field whose absence is harmless may be added without a version bump;
 //   - any change that alters how an existing event must be read bumps FormatVersion and adds an upgrade
 //     step below, plus a golden log in testdata/ that must keep rebuilding to the same state.
-const FormatVersion = 4
+const FormatVersion = 5
 
 // ErrNewerLogFormat is returned for an event written by a newer version of this library. It is refused, not
 // guessed at: Go's JSON decoder silently drops unknown fields, and an old reader that skipped a field which
@@ -36,6 +36,9 @@ var upgrades = map[int]func(Event) (Event, error){
 		}
 		return e, nil
 	},
+	// v4 -> v5: adds proxy runs (run_started.kind, call_received). Every v4 event reads unchanged; a v4
+	// library refuses a v5 log instead of misreading a proxy run as an agent run without a model.
+	4: func(e Event) (Event, error) { return e, nil },
 }
 
 // UpgradeAll brings every event to FormatVersion, or refuses the log at the first event it can't read.

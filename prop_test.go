@@ -79,6 +79,7 @@ func (g *historyGen) options(s State) []Event {
 	case StatusPaused:
 		return []Event{{Type: EvBudgetExtended, ExtraSteps: 1 + g.r.Intn(2), By: "ops"}}
 	case StatusFinished: // genHistory stops before asking
+	case StatusOpen: // proxy runs: TestProxyRunCallAfterCall, TestProxyAndAgentRunsDontMix
 	}
 	return nil
 }

@@ -6,6 +6,12 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Added
+
+- **Proxy runs** (log format v5): `run_started` with `kind: "proxy"` and the `call_received` event, for calls that
+  arrive from outside a `Runner` (the MCP proxy, [docs/MCP_PROXY.md](docs/MCP_PROXY.md)). A proxy run stays
+  `open` between calls; agent and proxy events can't mix in one run. A v0.3 library refuses v5 logs.
+
 ## [0.3.0] - 2026-10-07
 
 Correctness fixes from an outside review, and the bugs the new benchmarks found. Every module moves to v0.3.0.

@@ -39,6 +39,8 @@ var golden = []struct {
 	// v4: the scripted flow with an approval; run_started records key_bits (128), so its keys are 32 characters.
 	{file: "testdata/golden_v4_scripted_approved.jsonl", version: 4,
 		events: 26, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1},
+	// v5: a proxy run (calls from outside, e.g. an MCP client): a read, a keyed write, an unknown tool refused.
+	{file: "testdata/golden_v5_proxy.jsonl", version: 5, events: 9, effects: 1, status: StatusOpen},
 }
 
 func TestGoldenLogsStillRebuild(t *testing.T) {

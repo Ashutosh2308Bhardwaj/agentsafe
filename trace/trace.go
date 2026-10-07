@@ -150,6 +150,7 @@ func (b *traceBuilder) add(e agentsafe.Event) error {
 	case agentsafe.EvRunStarted: // the root span, built in newTraceBuilder
 	case agentsafe.EvModelDecided:
 		b.chat(e)
+	case agentsafe.EvCallReceived: // a proxy run: the tool span starts at tool_started (proxy traces: MCP proxy phase 4)
 	case agentsafe.EvToolStarted:
 		b.toolStarted(e)
 	case agentsafe.EvToolResult:
