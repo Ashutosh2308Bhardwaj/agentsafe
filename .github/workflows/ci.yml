@@ -13,8 +13,9 @@ jobs:
         go: ["1.23", "stable"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "${{ matrix.go }}" }
       - run: go build ./...
       - run: go vet ./...
@@ -22,8 +23,9 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: stable }
       - name: gofmt -s
         run: test -z "$(gofmt -s -l .)" || (gofmt -s -l . && exit 1)
@@ -31,7 +33,7 @@ jobs:
         run: |
           go test -coverprofile=coverage.out -covermode=atomic .
           go tool cover -func=coverage.out | tail -1
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with: { version: latest }
       - name: staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
@@ -49,8 +51,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults: { run: { working-directory: "${{ matrix.module }}" } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "${{ matrix.go }}", cache-dependency-path: "${{ matrix.module }}/go.sum" }
       - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
         working-directory: .
@@ -77,8 +80,9 @@ jobs:
       AGENTSAFE_REQUIRE_POSTGRES: "1" # fail, don't skip, if the database isn't there
     defaults: { run: { working-directory: postgres } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "${{ matrix.go }}", cache-dependency-path: postgres/go.sum }
       - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
         working-directory: .
@@ -93,13 +97,14 @@ jobs:
         module: [sqlite, postgres, anthropic, gemini]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: stable, cache-dependency-path: "${{ matrix.module }}/go.sum" }
       - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
         shell: bash
         run: go work init . "./${{ matrix.module }}"
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with: { version: latest, working-directory: "${{ matrix.module }}", args: --config ../.golangci.yml }
       - name: staticcheck
         working-directory: ${{ matrix.module }}
@@ -118,18 +123,20 @@ jobs:
         include:
           - { target: FuzzSame, pkg: ./reconcile }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: stable }
       - run: go test -run '^$' -fuzz='^${{ matrix.target }}$' -fuzztime=30s ${{ matrix.pkg }}
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with: { name: "fuzz-${{ matrix.target }}", path: "**/testdata/fuzz" }
   crash-harness:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: stable }
       - name: kill -9 at every point of the money flow (scripted model)
         run: ./scripts/money_sweep.sh

@@ -1,0 +1,14 @@
+# Keeps the pinned action SHAs and every module's dependencies current. Security updates arrive as soon as an
+# advisory is published; version updates are batched weekly, one PR per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories: ["/", "/sqlite", "/postgres", "/anthropic", "/gemini"]
+    schedule: { interval: weekly }
+    groups:
+      go-modules: { patterns: ["*"] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
