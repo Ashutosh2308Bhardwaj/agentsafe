@@ -39,6 +39,7 @@ type Event struct {
 	System   string `json:"system,omitempty"`
 	Task     string `json:"task,omitempty"`
 	MaxSteps int    `json:"max_steps,omitempty"` // the budget lives in the log, not in the runner's config
+	KeyBits  int    `json:"key_bits,omitempty"`  // idempotency key length for this run (v4+); fixed for the run's life
 	Provider string `json:"provider,omitempty"`  // e.g. "groq": so a trace can be built from the log alone
 	Model    string `json:"model,omitempty"`
 

@@ -6,6 +6,17 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Breaking
+
+- **Idempotency keys are 128 bits (32 hex characters) for new runs**, up from 64 (16): at 64 bits, a key collision
+  between two operations sent to the same provider would silently replay the first one's result for the second.
+  **Runs started before this version keep their 64-bit keys to the end** (log format v4 records `key_bits` on
+  `run_started`; a pre-v4 run reads as 64), so a run paused for approval across the upgrade still pays once,
+  under the key that was approved. If you store or match keys yourself (e.g. a column sized for 16
+  characters, or a provider with a short idempotency-key limit), allow 32.
+- Log format v4. A v0.2 library refuses v4 logs (`ErrNewerLogFormat`): don't roll back a library under a
+  run that a newer one has written to.
+
 ### Security
 
 - `gemini`: indirect dependencies upgraded past known advisories: `golang.org/x/crypto` v0.56.0 (GO-2026-6354,

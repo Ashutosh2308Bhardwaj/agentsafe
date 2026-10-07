@@ -29,6 +29,7 @@ type State struct {
 	Text    string // final answer
 	Events  int
 	Budget  int // max model decisions, from run_started + every budget_extended
+	KeyBits int // idempotency key length, from run_started: a run keeps it across library upgrades
 
 	// Approvals: decision per call id ("requested", "approved", "rejected"); ByKey: per operation key, so an
 	// approval can be addressed by the payout's key and a repeated identical decision is a no-op.
@@ -146,8 +147,11 @@ func (s *State) runStarted(e Event) error {
 	if e.MaxSteps <= 0 {
 		return fmt.Errorf("run_started without a budget (max_steps)")
 	}
+	if e.KeyBits != 64 && e.KeyBits != 128 && e.KeyBits != 256 {
+		return fmt.Errorf("run_started with key_bits %d (64, 128 or 256)", e.KeyBits)
+	}
 	s.Messages = []Message{{Role: RoleSystem, Content: Str(e.System)}, {Role: RoleUser, Content: Str(e.Task)}}
-	s.Budget, s.StartedBy = e.MaxSteps, e.By
+	s.Budget, s.StartedBy, s.KeyBits = e.MaxSteps, e.By, e.KeyBits
 	s.Status = StatusAwaitingModel
 	return nil
 }

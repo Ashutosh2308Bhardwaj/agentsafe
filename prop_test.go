@@ -59,7 +59,7 @@ type historyGen struct {
 func (g *historyGen) options(s State) []Event {
 	switch s.Status {
 	case StatusNew:
-		return []Event{{Type: EvRunStarted, Task: "t", MaxSteps: 1 + g.r.Intn(4), By: "scheduler"}}
+		return []Event{{Type: EvRunStarted, Task: "t", MaxSteps: 1 + g.r.Intn(4), KeyBits: KeyBits, By: "scheduler"}}
 	case StatusAwaitingModel:
 		return g.modelOptions(s)
 	case StatusExecuting:

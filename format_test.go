@@ -36,6 +36,9 @@ var golden = []struct {
 	// v3: the same flow sealed at rest (AES-256-GCM, test key 0x42 x 32, id "env"); one denial.
 	{file: "testdata/golden_v3_sealed.jsonl", version: 3, codec: AESGCM{Keys: map[string][]byte{"env": bytes.Repeat([]byte{0x42}, 32)}, Current: "env"},
 		events: 27, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1, denials: 1},
+	// v4: the scripted flow with an approval; run_started records key_bits (128), so its keys are 32 characters.
+	{file: "testdata/golden_v4_scripted_approved.jsonl", version: 4,
+		events: 26, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1},
 }
 
 func TestGoldenLogsStillRebuild(t *testing.T) {
@@ -54,6 +57,15 @@ func TestGoldenLogsStillRebuild(t *testing.T) {
 			if err != nil {
 				t.Fatalf("a log already on disk no longer rebuilds: %v", err)
 			}
+			// Runs started before v4 used 64-bit keys and must keep them; every key in the log has that length.
+			wantBits := 64
+			if g.version >= 4 {
+				wantBits = 128
+			}
+			if st.KeyBits != wantBits {
+				t.Fatalf("a v%d run must read as %d-bit keys, got %d", g.version, wantBits, st.KeyBits)
+			}
+			assertKeyLength(t, events, wantBits/4)
 			want := goldenShape{g.events, g.step, g.effects, g.msgs, g.status, g.stop, g.approvedOps, g.denials}
 			if got := shapeOf(st); got != want {
 				t.Fatalf("rebuilt state changed:\n got %+v\nwant %+v", got, want)

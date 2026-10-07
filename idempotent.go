@@ -127,18 +127,26 @@ func decimalText(r *big.Rat) string {
 	return r.FloatString(places)
 }
 
-func hash(parts ...string) string {
+// KeyBits is the idempotency key length of new runs: 128 bits, 32 hex characters. A run keeps the length it
+// started with (run_started.key_bits), so keys never change under a run that outlives a library upgrade.
+// 128, not the full 256: the key is also the payment provider's Idempotency-Key, and some providers cap it
+// near UUID length.
+const KeyBits = 128
+
+// hash is the first bits of the SHA-256 of parts, in hex. Lengths are prefixes of one digest, so a 64-bit
+// key is the first 16 characters of the 128-bit key for the same operation.
+func hash(bits int, parts ...string) string {
 	h := sha256.New()
 	for _, p := range parts {
 		h.Write([]byte(p))
 		h.Write([]byte{0})
 	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))[:bits/4]
 }
 
-// keyFor returns the idempotency key and payload hash for a call to an IdempotentTool.
-// scope separates unrelated batches (week 2: a hash of the input files).
-func keyFor(scope string, t IdempotentTool, args json.RawMessage) (key, payloadHash string, err error) {
+// keyFor returns the idempotency key and payload hash for a call to an IdempotentTool, bits long (the run's
+// KeyBits). scope separates unrelated batches (week 2: a hash of the input files).
+func keyFor(scope string, t IdempotentTool, args json.RawMessage, bits int) (key, payloadHash string, err error) {
 	identity, payload, err := t.Identity(args)
 	if err != nil {
 		return "", "", fmt.Errorf("identity: %w", err)
@@ -151,7 +159,7 @@ func keyFor(scope string, t IdempotentTool, args json.RawMessage) (key, payloadH
 	if err != nil {
 		return "", "", err
 	}
-	return hash(scope, t.Spec().Name, ci), hash(cp), nil
+	return hash(bits, scope, t.Spec().Name, ci), hash(bits, cp), nil
 }
 
 // replay builds the result the model sees for a repeated operation: the original result, marked.

@@ -65,7 +65,7 @@ func (r *Runner) Start(ctx context.Context, system, task string) (State, error) 
 		max = 8
 	}
 	st := NewState()
-	start := Event{Type: EvRunStarted, System: system, Task: task, MaxSteps: max, By: r.StartedBy}
+	start := Event{Type: EvRunStarted, System: system, Task: task, MaxSteps: max, KeyBits: KeyBits, By: r.StartedBy}
 	if d, ok := r.Model.(Describer); ok {
 		start.Provider, start.Model = d.Describe()
 	}
@@ -183,7 +183,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 	var key, ph string
 	if it, ok := tool.(IdempotentTool); ok && json.Valid([]byte(c.Function.Arguments)) {
 		// If the call can't be identified, it runs without a key and fails on its own validation.
-		if k, p, err := keyFor(r.scope(), it, json.RawMessage(c.Function.Arguments)); err == nil {
+		if k, p, err := keyFor(r.scope(), it, json.RawMessage(c.Function.Arguments), st.KeyBits); err == nil {
 			key, ph = k, p
 		}
 	}

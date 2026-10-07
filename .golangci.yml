@@ -18,7 +18,7 @@ linters:
     - unparam
   settings:
     gocyclo:
-      min-complexity: 16       # reports complexity > 15, as the Report Card does
+      min-complexity: 15       # reports complexity > 15, as the Report Card did
     exhaustive:
       default-signifies-exhaustive: true
     revive:

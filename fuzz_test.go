@@ -168,8 +168,8 @@ func FuzzFuncArgs(f *testing.F) {
 		_, _ = tool.(Gated).Summary(raw)
 		_ = tool.(Gated).NeedsApproval(raw)
 		_, _ = tool.CallWithKey(ctx, "k", raw)
-		k1, p1, err1 := keyFor("s", tool, raw)
-		k2, p2, err2 := keyFor("s", tool, raw)
+		k1, p1, err1 := keyFor("s", tool, raw, KeyBits)
+		k2, p2, err2 := keyFor("s", tool, raw, KeyBits)
 		if (err1 == nil) != (err2 == nil) || k1 != k2 || p1 != p2 {
 			t.Fatalf("the same arguments gave different keys: %s/%s vs %s/%s", k1, p1, k2, p2)
 		}

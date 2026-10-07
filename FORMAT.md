@@ -15,6 +15,7 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 | 3 | step 2.6 | adds `sealed`: the content fields (`system`, `task`, `message`, `args`, `result`, `summary`, `text`, `reason`) encrypted by a `Codec` (`seal.go`), with those fields empty. Bumped, not rule 2: a v2 library would read a sealed event as one with empty content, a different history. A sealed event read without its Codec is refused (`ErrSealed`). |
 | 3 | step 4.3 | adds optional `message.native`: a provider's own form of an assistant message (Claude: the response's content blocks, thinking included), replayed verbatim so a resumed run sends exactly what it sent before. No version bump: rule 2 (an older library ignores it; a run resumed without it on Claude fails loudly with a 400, never silently). |
 | 3 | step 5.1 | Idempotency keys: `Canonical` keeps a number that doesn't round-trip through float64 (an integer above 2^53, say) as its exact decimal text instead of rounding it. Keys change **only** for such numbers, which previously collided (two invoices, one key); every other key is byte-identical (`TestCanonicalUnchangedForExactNumbers`). Numbers with an exponent beyond ±400 are refused. |
+| 4 | v0.3.0 | adds `run_started.key_bits`: the idempotency key length of the run. New runs use 128 bits (32 hex characters; earlier, 64 bits, 16 characters). Bumped, not rule 2: a pre-v4 `run_started` without the field **means 64**, and the upgrade step says so. A run keeps its key length for life, so a run paused or crashed under an older library resumes on the keys it started with: a recomputed, longer key would not be found in the log and would reach the provider as a new idempotency key, a second payment (`TestRunStartedBeforeV4KeepsItsKeysAcrossAnUpgrade`). A v4 `run_started` without a valid `key_bits` (64, 128 or 256) is refused. |
 
 ## Reading
 
@@ -27,7 +28,8 @@ Every event carries `"v"`, the format version it was written in (`agentsafe.Form
 1. **Never rename, remove or change the meaning of a field.** Only add.
 2. **An optional field whose absence is harmless** may be added without a version bump. Older libraries ignore it, and that's safe by definition.
 3. **Anything else** bumps `FormatVersion` and adds an upgrade step `upgrades[old] = func(Event) (Event, error)`.
-4. **Commit a golden log** of the new version to `testdata/` and add it to `TestGoldenLogsStillRebuild`. Golden logs are never edited or deleted: they are the proof that every log ever written still rebuilds to the same state.
+4. **Never change the key of an operation under a running run.** Keys live in the log and at the provider (as its idempotency key), so any change to how keys are derived (length, hashing, `Canonical`) is recorded per run, like `key_bits`, and old runs keep the old derivation.
+5. **Commit a golden log** of the new version to `testdata/` and add it to `TestGoldenLogsStillRebuild`. Golden logs are never edited or deleted: they are the proof that every log ever written still rebuilds to the same state.
 
 Current golden logs:
 - `golden_v0_real_gateway_crash.jsonl`: a real `openai/gpt-oss-120b` run with a grounding refusal, an approval, and a kill -9 right after the payment gateway charged.
@@ -35,3 +37,4 @@ Current golden logs:
 - `golden_v1_chained_approved.jsonl`: the same, with the hash chain on every line.
 - `golden_v2_denied_then_approved.jsonl`: the example's approval refused twice by its Authorizer (approver not on the list), then approved by an allowed approver.
 - `golden_v3_sealed.jsonl`: the example sealed at rest (AES-256-GCM; the test key is in `format_test.go`), with one refused approval.
+- `golden_v4_scripted_approved.jsonl`: the scripted example through its approval gate, with `key_bits` 128 (32-character keys). Every older golden log must read as 64-bit, with every key 16 characters.

@@ -72,6 +72,7 @@ agentsafe does not detect injection: it bounds what an injected model can do. An
 | Power loss mid-write | A torn last line is dropped and repaired; acknowledged lines are never lost | `TestTornAtEveryByte`, `TestZeroFilledTailIsTorn` | — |
 | A log write fails (disk full) | The run stops before acting | `TestEveryLogWriteFailureStopsTheRunBeforeItActs` | — |
 | fsync fails | The log handle is poisoned (no fsync retry: "fsyncgate"); a new process continues from what's on disk | `TestFailedWritesPoisonTheStore`, `TestFsyncFailureBeforeAPayoutMeansNoPayout` | Whether the in-doubt line survives is unknown; both outcomes are valid histories |
+| The library is upgraded under a paused or crashed run | Logs are versioned and upgraded on read; a newer format is refused, not guessed; a run keeps its key length (`key_bits`) for life, so it resumes on the keys the log and the provider already hold | `TestRunStartedBeforeV4KeepsItsKeysAcrossAnUpgrade`, `TestGoldenLogsStillRebuild`, `TestNewerFormatIsRefusedNotGuessed` | Rolling back to an older library under a run a newer one wrote to is refused, not supported |
 | A provider times out, rate-limits or errors | Retries only what's safe to retry, honouring `Retry-After`; model calls are side-effect free | `TestOpenAIRetriesTransientFailuresHonouringRetryAfter`, `TestOpenAIClientErrorsAreNotRetried` | — |
 
 ### T6. Concurrent or stale runners
