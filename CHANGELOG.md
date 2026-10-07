@@ -6,6 +6,11 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
+Correctness fixes from an outside review, and the bugs the new benchmarks found. Every module moves to v0.3.0.
+**Read Breaking before upgrading:** keys are longer for new runs, and the log format is v4.
+
 ### Breaking
 
 - **Idempotency keys are 128 bits (32 hex characters) for new runs**, up from 64 (16): at 64 bits, a key collision
@@ -108,6 +113,7 @@ The first release: correctness primitives for LLM agents that act on money, hard
 - A payout a human rejected could be approved if the model proposed it again under a new call id (found by property tests).
 - The example gateway charged once per key only for sequential calls, not simultaneous ones.
 
-[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/releases/tag/v0.1.0
