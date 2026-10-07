@@ -18,12 +18,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
 
-// Model calls a /chat/completions API.
+// Model calls a /chat/completions API. It is safe for concurrent use: runners may share one Model.
 // Plain net/http on purpose: timeouts and retries are explicit here, never inherited from an SDK's
 // defaults (week 1 F2: one SDK had no timeout, another retried twice silently).
 type Model struct {
@@ -34,6 +35,7 @@ type Model struct {
 	MaxAttempts int                  // 0 = 3. Retries only transient failures, and says so via Logf.
 	Logf        func(string, ...any) // nil = silent
 
+	mu     sync.Mutex  // guards limits: concurrent Decide calls share the rate-limit window
 	limits http.Header // last rate-limit headers, for pacing
 }
 
@@ -109,7 +111,7 @@ func (m *Model) Decide(ctx context.Context, messages []agentsafe.Message, tools 
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close() // fully read; a close error can't change what we got
-		m.limits = resp.Header
+		m.setLimits(resp.Header)
 
 		switch {
 		case resp.StatusCode == http.StatusOK:
@@ -151,19 +153,34 @@ func (m *Model) backoff(ctx context.Context, attempt, attempts int, why string, 
 // pace waits for the per-minute token window to reset if the last response said it's nearly spent,
 // instead of sending a request we know will be rejected (week 1 F4). Groq sends these headers.
 func (m *Model) pace(ctx context.Context) {
-	if m.limits == nil {
+	limits := m.lastLimits()
+	if limits == nil {
 		return
 	}
-	left, err := strconv.Atoi(m.limits.Get("x-ratelimit-remaining-tokens"))
+	left, err := strconv.Atoi(limits.Get("x-ratelimit-remaining-tokens"))
 	if err != nil || left >= 3000 {
 		return
 	}
-	wait, err := time.ParseDuration(m.limits.Get("x-ratelimit-reset-tokens")) // e.g. "4.965s", "1m26.4s"
+	wait, err := time.ParseDuration(limits.Get("x-ratelimit-reset-tokens")) // e.g. "4.965s", "1m26.4s"
 	if err != nil {
 		wait = 10 * time.Second
 	}
 	m.logf("[pacing: %d tokens left this minute, waiting %s]", left, wait.Round(100*time.Millisecond))
 	sleep(ctx, wait)
+}
+
+func (m *Model) setLimits(h http.Header) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.limits = h
+}
+
+// lastLimits is the most recent response's headers: http.Header from a finished response is never written
+// again, so callers may read it without the lock.
+func (m *Model) lastLimits() http.Header {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.limits
 }
 
 func (m *Model) logf(f string, a ...any) {

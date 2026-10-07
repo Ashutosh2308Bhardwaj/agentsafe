@@ -180,3 +180,35 @@ func TestOpenAIDescribe(t *testing.T) {
 		}
 	}
 }
+
+// One Model shared by several runners deciding at once: what any caller would do with a client value. Run
+// under -race, this fails if Decide and its pacing share unguarded state.
+func TestOpenAIModelIsSafeForConcurrentUse(t *testing.T) {
+	const n = 8
+	replies := make([]fakeReply, n)
+	for i := range replies {
+		replies[i] = fakeReply{status: 200, body: okToolCall,
+			headers: map[string]string{"x-ratelimit-remaining-tokens": "100000", "x-ratelimit-reset-tokens": "1s"}}
+	}
+	m, f, _ := chatModel(t, replies...)
+	msgs := []agentsafe.Message{{Role: agentsafe.RoleUser, Content: agentsafe.Str("pay T1")}}
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := m.Decide(context.Background(), msgs, nil); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if f.requests() != n {
+		t.Fatalf("want %d requests, got %d", n, f.requests())
+	}
+}
