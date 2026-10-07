@@ -1,6 +1,8 @@
 # agentsafe
 
-> **Status: v0.1.0, pre-1.0** ([CHANGELOG](CHANGELOG.md)). The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
+[![CI](https://github.com/Ashutosh2308Bhardwaj/agentsafe/actions/workflows/ci.yml/badge.svg)](https://github.com/Ashutosh2308Bhardwaj/agentsafe/actions/workflows/ci.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Ashutosh2308Bhardwaj/agentsafe/badge)](https://scorecard.dev/viewer/?uri=github.com/Ashutosh2308Bhardwaj/agentsafe) [![Go Reference](https://pkg.go.dev/badge/github.com/Ashutosh2308Bhardwaj/agentsafe.svg)](https://pkg.go.dev/github.com/Ashutosh2308Bhardwaj/agentsafe)
+
+> **Status: v0.2.0, pre-1.0** ([CHANGELOG](CHANGELOG.md)). The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
 
 ```bash
 go get github.com/Ashutosh2308Bhardwaj/agentsafe
