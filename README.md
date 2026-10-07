@@ -96,7 +96,7 @@ $ go run . approve          # again: nothing is paid twice
 nothing to approve; the run is finished
 ```
 
-To use a real model, replace the `ScriptedModel` with `anthropic.New(sdk.NewClient())` (`go get github.com/Ashutosh2308Bhardwaj/agentsafe/anthropic`), `gemini.New(client, model)`, or `&openai.Model{...}` (`agentsafe/openai`) for Groq, OpenAI, Ollama or vLLM. Then add `agentsafe.Check(...)` to ground arguments against your data before anyone is asked to approve, and `agentsafe.Reconcile` to check the run against your systems of record. This exact program is [examples/quickstart](examples/quickstart), and CI runs it as three processes.
+To use a real model, replace the `ScriptedModel` with `anthropic.New(sdk.NewClient())` (`go get github.com/Ashutosh2308Bhardwaj/agentsafe/anthropic`), `gemini.New(client, model)`, or `&openai.Model{...}` (`agentsafe/openai`) for Groq, OpenAI, Ollama or vLLM. Then add `agentsafe.Check(...)` to ground arguments against your data before anyone is asked to approve, and `reconcile.Audit` (`agentsafe/reconcile`) to check the run against your systems of record. This exact program is [examples/quickstart](examples/quickstart), and CI runs it as three processes.
 
 ## What goes wrong when the caller is a model
 
@@ -165,5 +165,15 @@ go run ./examples/reconcile -run <id> -approve <key>
 go run ./examples/reconcile -run <id> -check    # reconcile any run against its systems of record
 go run ./cmd/trace examples/reconcile/out/<id>-log.jsonl
 ```
+
+### Examples
+
+Each runs offline (scripted model, fake external system), and each has a test that runs it as real processes.
+
+| Example | What goes wrong | What agentsafe does |
+|---|---|---|
+| [quickstart](examples/quickstart) | A payout must wait for a human, across restarts | The run waits durably at the approval gate; approving in a new process pays once |
+| [subscription](examples/subscription) | An HTTP call times out, or the process dies, right after the API made a billed change | The unknown outcome is retried with the same idempotency key: one invoice. Without the key: two |
+| [reconcile](examples/reconcile) | A model reconciling a ledger gets values wrong; a gateway under-pays or drops a write | Grounding refuses wrong values; the approval gate; reconciliation catches what every report missed |
 
 `examples/reconcile` is a payout-reconciliation agent: it compares a ledger with a bank settlement file, records each discrepancy once, and re-issues payouts the bank never settled, behind an approval. `gateway.go` is a file-backed fake payment gateway with idempotency keys, status lookup, lost responses, a crash point, and four silent-fault modes.
