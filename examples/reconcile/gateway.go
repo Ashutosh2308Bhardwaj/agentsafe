@@ -42,6 +42,7 @@ type Payment struct {
 	Ref       string  `json:"ref"`
 }
 
+// ErrTimeout is a lost response: the gateway may have charged.
 var ErrTimeout = errors.New("gateway timeout: no response (the payment may or may not have happened)")
 
 // load returns payments by payment id (not by key: a buggy gateway can hold two payments for one key).

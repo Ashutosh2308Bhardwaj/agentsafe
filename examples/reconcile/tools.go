@@ -25,15 +25,17 @@ type Row struct {
 	Note         string   `json:"note,omitempty"`
 }
 
-// ReadCSV: read-only.
+// ReadCSV is a read-only tool: it returns a source file's rows.
 type ReadCSV struct{ Dir string }
 
+// Spec describes the tool to the model.
 func (t *ReadCSV) Spec() agentsafe.ToolSpec {
 	return agentsafe.ToolSpec{Name: "read_csv",
 		Description: "Read a whole file. 'ledger' = payouts we sent. 'bank' = the bank's settlement file.",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"file":{"type":"string","enum":["ledger","bank"]}},"required":["file"]}`)}
 }
 
+// Call reads the file.
 func (t *ReadCSV) Call(_ context.Context, args json.RawMessage) (any, error) {
 	var a struct{ File string }
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -46,15 +48,17 @@ func (t *ReadCSV) Call(_ context.Context, args json.RawMessage) (any, error) {
 	return map[string]any{"file": a.File, "rows": rows}, err
 }
 
-// CompareRows: read-only.
+// CompareRows is a read-only tool: it returns both files' rows for one transaction.
 type CompareRows struct{ Dir string }
 
+// Spec describes the tool to the model.
 func (t *CompareRows) Spec() agentsafe.ToolSpec {
 	return agentsafe.ToolSpec{Name: "compare_rows",
 		Description: "Return every row with this txn_id from BOTH files, side by side.",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"txn_id":{"type":"string"}},"required":["txn_id"]}`)}
 }
 
+// Call returns the rows for the transaction from both files.
 func (t *CompareRows) Call(_ context.Context, args json.RawMessage) (any, error) {
 	var a struct {
 		TxnID string `json:"txn_id"`
@@ -79,14 +83,14 @@ func (t *CompareRows) Call(_ context.Context, args json.RawMessage) (any, error)
 	return out, nil
 }
 
-// RecordDiscrepancy: the WRITE. It implements agentsafe.IdempotentTool: it declares what identifies the
+// RecordDiscrepancy is the WRITE. It implements agentsafe.IdempotentTool: it declares what identifies the
 // operation, and its effect dedupes on the key the library hands it. The library does the rest.
 type RecordDiscrepancy struct {
 	Ledger *Ledger
 	Dir    string // source files, for Validate
 }
 
-// Identity: (txn_id, kind) define the discrepancy. The amounts are the payload (a retry with different
+// Identity says (txn_id, kind) define the discrepancy. The amounts are the payload (a retry with different
 // amounts is a conflict). The note is in neither: rewording it doesn't make a new discrepancy.
 func (t *RecordDiscrepancy) Identity(args json.RawMessage) (any, any, error) {
 	var r Row
@@ -119,6 +123,7 @@ func (t *RecordDiscrepancy) CallWithKey(_ context.Context, key string, args json
 	return out, nil
 }
 
+// Spec describes the tool to the model.
 func (t *RecordDiscrepancy) Spec() agentsafe.ToolSpec {
 	return agentsafe.ToolSpec{Name: "record_discrepancy",
 		Description: "Record ONE discrepancy in the reconciliation ledger. This is a write: each call adds a row.",
@@ -129,6 +134,7 @@ func (t *RecordDiscrepancy) Spec() agentsafe.ToolSpec {
 			"required":["txn_id","kind","ledger_amount","bank_amount","note"]}`)}
 }
 
+// Call writes without a key. The runner uses it only when the tool is wrapped in plainTool (NO_IDEMPOTENCY=1).
 func (t *RecordDiscrepancy) Call(_ context.Context, args json.RawMessage) (any, error) {
 	var r Row
 	if err := json.Unmarshal(args, &r); err != nil {
@@ -150,6 +156,7 @@ type Ledger struct {
 	DropNext bool // silent fault (week 4 S3): the next new write is acknowledged and NOT stored
 }
 
+// Rows reads every recorded discrepancy.
 func (l *Ledger) Rows() ([]Row, error) {
 	f, err := os.Open(l.Path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -191,6 +198,8 @@ func (l *Ledger) AppendOnce(r Row) (id int, existed bool, err error) {
 	return id, false, err
 }
 
+// Append writes a row without checking for an existing one: AppendOnce calls it after its check, and on its own
+// it is the control experiment's write (a retry adds a second row).
 func (l *Ledger) Append(r Row) (int, error) {
 	rows, err := l.Rows()
 	if err != nil {
@@ -265,42 +274,50 @@ func (t *RecordDiscrepancy) Validate(_ context.Context, args json.RawMessage) er
 	if err != nil {
 		return err
 	}
-	la, ba := amountOf(ledger), amountOf(bank)
-	var wantL, wantB *float64
-	switch r.Kind {
-	case "amount_mismatch":
-		if la == nil || ba == nil || *la == *ba {
-			return fmt.Errorf("%s is not an amount mismatch in the files (ledger %s, bank %s)", r.TxnID, show(la), show(ba))
-		}
-		wantL, wantB = la, ba
-	case "missing_in_bank":
-		if la == nil || len(bank) > 0 {
-			return fmt.Errorf("%s is not missing from the bank (ledger rows %d, bank rows %d)", r.TxnID, len(ledger), len(bank))
-		}
-		wantL, wantB = la, nil
-	case "missing_in_ledger":
-		if ba == nil || len(ledger) > 0 {
-			return fmt.Errorf("%s is not missing from the ledger (ledger rows %d, bank rows %d)", r.TxnID, len(ledger), len(bank))
-		}
-		wantL, wantB = nil, ba
-	case "duplicate_in_bank":
-		if len(bank) < 2 {
-			return fmt.Errorf("%s appears %d time(s) in the bank file, not twice", r.TxnID, len(bank))
-		}
-		wantL, wantB = la, ba
-	case "duplicate_in_ledger":
-		if len(ledger) < 2 {
-			return fmt.Errorf("%s appears %d time(s) in the ledger, not twice", r.TxnID, len(ledger))
-		}
-		wantL, wantB = la, ba
-	default:
-		return fmt.Errorf("unknown kind %q", r.Kind)
+	wantL, wantB, err := expectedAmounts(r.Kind, r.TxnID, ledger, bank)
+	if err != nil {
+		return err
 	}
 	if !eq(r.LedgerAmount, wantL) || !eq(r.BankAmount, wantB) {
 		return fmt.Errorf("for %s %s the files say ledger_amount=%s, bank_amount=%s; you sent %s, %s",
 			r.TxnID, r.Kind, show(wantL), show(wantB), show(r.LedgerAmount), show(r.BankAmount))
 	}
 	return nil
+}
+
+// expectedAmounts says whether the files show a discrepancy of this kind for txnID and, if they do, which
+// amounts a correct record of it carries (nil: that side has no amount).
+func expectedAmounts(kind, txnID string, ledger, bank []map[string]string) (wantL, wantB *float64, err error) {
+	la, ba := amountOf(ledger), amountOf(bank)
+	switch kind {
+	case "amount_mismatch":
+		if la == nil || ba == nil || *la == *ba {
+			return nil, nil, fmt.Errorf("%s is not an amount mismatch in the files (ledger %s, bank %s)", txnID, show(la), show(ba))
+		}
+		return la, ba, nil
+	case "missing_in_bank":
+		if la == nil || len(bank) > 0 {
+			return nil, nil, fmt.Errorf("%s is not missing from the bank (ledger rows %d, bank rows %d)", txnID, len(ledger), len(bank))
+		}
+		return la, nil, nil
+	case "missing_in_ledger":
+		if ba == nil || len(ledger) > 0 {
+			return nil, nil, fmt.Errorf("%s is not missing from the ledger (ledger rows %d, bank rows %d)", txnID, len(ledger), len(bank))
+		}
+		return nil, ba, nil
+	case "duplicate_in_bank":
+		if len(bank) < 2 {
+			return nil, nil, fmt.Errorf("%s appears %d time(s) in the bank file, not twice", txnID, len(bank))
+		}
+		return la, ba, nil
+	case "duplicate_in_ledger":
+		if len(ledger) < 2 {
+			return nil, nil, fmt.Errorf("%s appears %d time(s) in the ledger, not twice", txnID, len(ledger))
+		}
+		return la, ba, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown kind %q", kind)
+	}
 }
 
 // ---- send_payout: irreversible, validated, gated, idempotent ---------------------------------------------
@@ -317,6 +334,7 @@ type payoutArgs struct {
 	Amount float64 `json:"amount_inr"`
 }
 
+// Spec describes the tool to the model.
 func (t *SendPayout) Spec() agentsafe.ToolSpec {
 	return agentsafe.ToolSpec{Name: "send_payout",
 		Description: "Re-send a payout that is in our ledger but missing from the bank settlement (the payee was never " +
@@ -331,18 +349,19 @@ func (t *SendPayout) parse(a json.RawMessage) (payoutArgs, error) {
 	return p, json.Unmarshal(a, &p)
 }
 
+// Call refuses: a payout is only ever sent with its idempotency key (CallWithKey).
 func (t *SendPayout) Call(context.Context, json.RawMessage) (any, error) {
 	return nil, errors.New("send_payout must run through the idempotent path")
 }
 
-// Identity: a re-issue OF a txn_id is the operation; payee and amount are its payload. Identity comes from
+// Identity says a re-issue OF a txn_id is the operation; payee and amount are its payload. Identity comes from
 // the source data (the txn_id), never from a UUID the model makes up (week 2 S1).
 func (t *SendPayout) Identity(a json.RawMessage) (any, any, error) {
 	p, err := t.parse(a)
 	return map[string]any{"op": "reissue", "txn_id": p.TxnID}, map[string]any{"payee": p.Payee, "amount_inr": p.Amount}, err
 }
 
-// Validate: the txn must be in the ledger and absent from the bank, and payee + amount must equal the ledger.
+// Validate checks that the txn is be in the ledger and absent from the bank, and payee + amount must equal the ledger.
 func (t *SendPayout) Validate(_ context.Context, a json.RawMessage) error {
 	p, err := t.parse(a)
 	if err != nil {
@@ -362,6 +381,7 @@ func (t *SendPayout) Validate(_ context.Context, a json.RawMessage) error {
 	return nil
 }
 
+// NeedsApproval is always true: money never moves without a human.
 func (t *SendPayout) NeedsApproval(json.RawMessage) bool { return true }
 
 // Summary is built from validated args only (Validate runs first).
@@ -371,7 +391,7 @@ func (t *SendPayout) Summary(a json.RawMessage) (any, error) {
 		"why": "in our ledger as sent; absent from the bank settlement file"}, err
 }
 
-// CallWithKey: send with the key as the gateway's Idempotency-Key. If the response is lost, ask the gateway
+// CallWithKey sends with the key as the gateway's Idempotency-Key. If the response is lost, ask the gateway
 // by key before anything else (outcome unknown → look, don't guess: week 1 F13).
 func (t *SendPayout) CallWithKey(_ context.Context, key string, a json.RawMessage) (any, error) {
 	p, err := t.parse(a)

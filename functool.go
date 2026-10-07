@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -279,19 +280,20 @@ var (
 	numberType  = reflect.TypeFor[json.Number]()
 )
 
+// namedSchemas are types whose JSON form isn't what their kind suggests.
+var namedSchemas = map[reflect.Type]map[string]any{
+	decimalType: {"type": "string", "pattern": `^-?[0-9]+(\.[0-9]+)?$`, "description": "an exact decimal number, as text"},
+	timeType:    {"type": "string", "format": "date-time"},
+	rawType:     {},
+	numberType:  {"type": "number"},
+}
+
 func typeSchema(t reflect.Type, seen map[reflect.Type]bool) (map[string]any, error) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	switch t {
-	case decimalType:
-		return map[string]any{"type": "string", "pattern": `^-?[0-9]+(\.[0-9]+)?$`, "description": "an exact decimal number, as text"}, nil
-	case timeType:
-		return map[string]any{"type": "string", "format": "date-time"}, nil
-	case rawType:
-		return map[string]any{}, nil
-	case numberType:
-		return map[string]any{"type": "number"}, nil
+	if s, ok := namedSchemas[t]; ok {
+		return maps.Clone(s), nil
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -303,26 +305,28 @@ func typeSchema(t reflect.Type, seen map[reflect.Type]bool) (map[string]any, err
 		return map[string]any{"type": "integer"}, nil
 	case reflect.Float32, reflect.Float64:
 		return map[string]any{"type": "number"}, nil
-	case reflect.Slice, reflect.Array:
-		items, err := typeSchema(t.Elem(), seen)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"type": "array", "items": items}, nil
-	case reflect.Map:
-		if t.Key().Kind() != reflect.String {
-			return nil, fmt.Errorf("map keys must be strings in a tool input (%s)", t)
-		}
-		v, err := typeSchema(t.Elem(), seen)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"type": "object", "additionalProperties": v}, nil
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return containerSchema(t, seen)
 	case reflect.Struct:
 		return structSchema(t, seen)
 	default: // channels, funcs, interfaces, complex numbers: nothing a model can send as JSON
 		return nil, fmt.Errorf("type %s can't be a tool input", t)
 	}
+}
+
+// containerSchema is an array of its element type, or an object whose values are (keys must be strings).
+func containerSchema(t reflect.Type, seen map[reflect.Type]bool) (map[string]any, error) {
+	if t.Kind() == reflect.Map && t.Key().Kind() != reflect.String {
+		return nil, fmt.Errorf("map keys must be strings in a tool input (%s)", t)
+	}
+	elem, err := typeSchema(t.Elem(), seen)
+	if err != nil {
+		return nil, err
+	}
+	if t.Kind() == reflect.Map {
+		return map[string]any{"type": "object", "additionalProperties": elem}, nil
+	}
+	return map[string]any{"type": "array", "items": elem}, nil
 }
 
 // structSchema is an object schema: exported fields by their JSON names, required unless optional.

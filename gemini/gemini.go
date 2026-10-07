@@ -67,65 +67,96 @@ func (m *Model) Request(messages []agentsafe.Message, tools []agentsafe.ToolSpec
 		maxOut = DefaultMaxOutputTokens
 	}
 	config := &genai.GenerateContentConfig{MaxOutputTokens: maxOut}
-	if len(tools) > 0 {
-		decls := make([]*genai.FunctionDeclaration, len(tools))
-		for i, t := range tools {
-			var schema any
-			if len(t.Parameters) > 0 {
-				if err := json.Unmarshal(t.Parameters, &schema); err != nil {
-					return nil, nil, fmt.Errorf("gemini: tool %s: parameters aren't JSON: %w", t.Name, err)
-				}
-			}
-			decls[i] = &genai.FunctionDeclaration{Name: t.Name, Description: t.Description, ParametersJsonSchema: schema}
-		}
-		config.Tools = []*genai.Tool{{FunctionDeclarations: decls}}
+	t, err := toolsConfig(tools)
+	if err != nil {
+		return nil, nil, err
 	}
+	config.Tools = t
 
-	names := map[string]string{} // tool call id -> function name, for the responses
-	var contents []*genai.Content
-	var results []*genai.Part // function responses waiting to go out as one turn
-	flush := func() {
-		if len(results) > 0 {
-			contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: results})
-			results = nil
-		}
-	}
+	r := replay{names: map[string]string{}}
 	for i, msg := range messages {
-		switch msg.Role {
-		case agentsafe.RoleSystem:
+		if msg.Role == agentsafe.RoleSystem {
 			if i != 0 {
 				return nil, nil, fmt.Errorf("gemini: a system message at position %d; only the first message may be one", i)
 			}
 			config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text(msg)}}}
-		case agentsafe.RoleUser:
-			flush()
-			contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{Text: text(msg)}}})
-		case agentsafe.RoleAssistant:
-			flush()
-			c, err := modelTurn(msg)
-			if err != nil {
-				return nil, nil, fmt.Errorf("gemini: message %d: %w", i, err)
-			}
-			for _, tc := range msg.ToolCalls {
-				names[tc.ID] = tc.Function.Name
-			}
-			contents = append(contents, c)
-		case agentsafe.RoleTool:
-			name, ok := names[msg.ToolCallID]
-			if !ok {
-				return nil, nil, fmt.Errorf("gemini: message %d answers call %q, which no earlier turn made", i, msg.ToolCallID)
-			}
-			fr := &genai.FunctionResponse{Name: name, Response: responseObject(text(msg))}
-			if !strings.HasPrefix(msg.ToolCallID, derivedPrefix) {
-				fr.ID = msg.ToolCallID // Gemini gave the call an id: echo it
-			}
-			results = append(results, &genai.Part{FunctionResponse: fr})
-		default:
-			return nil, nil, fmt.Errorf("gemini: message %d has unknown role %q", i, msg.Role)
+			continue
+		}
+		if err := r.add(i, msg); err != nil {
+			return nil, nil, err
 		}
 	}
-	flush()
-	return contents, config, nil
+	r.flush()
+	return r.contents, config, nil
+}
+
+// toolsConfig declares the tools, their JSON schemas passed through as they are.
+func toolsConfig(tools []agentsafe.ToolSpec) ([]*genai.Tool, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	decls := make([]*genai.FunctionDeclaration, len(tools))
+	for i, t := range tools {
+		var schema any
+		if len(t.Parameters) > 0 {
+			if err := json.Unmarshal(t.Parameters, &schema); err != nil {
+				return nil, fmt.Errorf("gemini: tool %s: parameters aren't JSON: %w", t.Name, err)
+			}
+		}
+		decls[i] = &genai.FunctionDeclaration{Name: t.Name, Description: t.Description, ParametersJsonSchema: schema}
+	}
+	return []*genai.Tool{{FunctionDeclarations: decls}}, nil
+}
+
+// replay turns the conversation into Gemini contents, one message at a time.
+type replay struct {
+	contents []*genai.Content
+	names    map[string]string // tool call id -> function name, for the responses
+	results  []*genai.Part     // function responses waiting to go out as one turn
+}
+
+func (r *replay) add(i int, msg agentsafe.Message) error {
+	switch msg.Role {
+	case agentsafe.RoleUser:
+		r.flush()
+		r.contents = append(r.contents, &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{Text: text(msg)}}})
+	case agentsafe.RoleAssistant:
+		r.flush()
+		c, err := modelTurn(msg)
+		if err != nil {
+			return fmt.Errorf("gemini: message %d: %w", i, err)
+		}
+		for _, tc := range msg.ToolCalls {
+			r.names[tc.ID] = tc.Function.Name
+		}
+		r.contents = append(r.contents, c)
+	case agentsafe.RoleTool:
+		return r.addResult(i, msg)
+	default:
+		return fmt.Errorf("gemini: message %d has unknown role %q", i, msg.Role)
+	}
+	return nil
+}
+
+func (r *replay) addResult(i int, msg agentsafe.Message) error {
+	name, ok := r.names[msg.ToolCallID]
+	if !ok {
+		return fmt.Errorf("gemini: message %d answers call %q, which no earlier turn made", i, msg.ToolCallID)
+	}
+	fr := &genai.FunctionResponse{Name: name, Response: responseObject(text(msg))}
+	if !strings.HasPrefix(msg.ToolCallID, derivedPrefix) {
+		fr.ID = msg.ToolCallID // Gemini gave the call an id: echo it
+	}
+	r.results = append(r.results, &genai.Part{FunctionResponse: fr})
+	return nil
+}
+
+// flush sends the waiting function responses as one user turn.
+func (r *replay) flush() {
+	if len(r.results) > 0 {
+		r.contents = append(r.contents, &genai.Content{Role: genai.RoleUser, Parts: r.results})
+		r.results = nil
+	}
 }
 
 // modelTurn replays a turn exactly as Gemini returned it, or (a turn from another provider) rebuilds it.
@@ -172,26 +203,41 @@ func decision(resp *genai.GenerateContentResponse, historyLen int) (agentsafe.De
 	if err != nil {
 		return agentsafe.Decision{}, fmt.Errorf("gemini: storing the response: %w", err)
 	}
-	msg := agentsafe.Message{Role: agentsafe.RoleAssistant, Native: native}
+	msg, err := parseParts(content.Parts, historyLen)
+	if err != nil {
+		return agentsafe.Decision{}, err
+	}
+	msg.Native = native
+
+	finish, err := finishReason(cand, len(msg.ToolCalls) > 0)
+	if err != nil {
+		return agentsafe.Decision{}, err
+	}
+	if finish == "refusal" {
+		d := refused(fmt.Sprintf("the response was blocked: %s %s", cand.FinishReason, cand.FinishMessage))
+		d.Message.Native = native
+		return d, nil
+	}
+	d := agentsafe.Decision{Message: msg, FinishReason: finish}
+	if u := resp.UsageMetadata; u != nil {
+		d.Usage = agentsafe.Usage{PromptTokens: int(u.PromptTokenCount), CompletionTokens: int(u.CandidatesTokenCount + u.ThoughtsTokenCount)}
+	}
+	return d, nil
+}
+
+// parseParts reads the answer text and the tool calls out of a response, skipping thought summaries.
+func parseParts(parts []*genai.Part, historyLen int) (agentsafe.Message, error) {
+	msg := agentsafe.Message{Role: agentsafe.RoleAssistant}
 	var texts []string
-	for i, p := range content.Parts {
+	for i, p := range parts {
 		switch {
 		case p.Thought: // a thought summary: not part of the answer
 		case p.FunctionCall != nil:
-			args, err := json.Marshal(p.FunctionCall.Args)
+			tc, err := toolCall(p.FunctionCall, historyLen, i)
 			if err != nil {
-				return agentsafe.Decision{}, fmt.Errorf("gemini: function call arguments: %w", err)
+				return msg, err
 			}
-			if p.FunctionCall.Args == nil {
-				args = []byte("{}")
-			}
-			id := p.FunctionCall.ID
-			if id == "" {
-				// Unique within the run and the same on every replay: the history only grows.
-				id = fmt.Sprintf("%s%d-%d", derivedPrefix, historyLen, i)
-			}
-			msg.ToolCalls = append(msg.ToolCalls, agentsafe.ToolCall{ID: id, Type: "function",
-				Function: agentsafe.FunctionCall{Name: p.FunctionCall.Name, Arguments: string(args)}})
+			msg.ToolCalls = append(msg.ToolCalls, tc)
 		case p.Text != "":
 			texts = append(texts, p.Text)
 		}
@@ -199,30 +245,44 @@ func decision(resp *genai.GenerateContentResponse, historyLen int) (agentsafe.De
 	if len(texts) > 0 {
 		msg.Content = agentsafe.Str(strings.Join(texts, ""))
 	}
+	return msg, nil
+}
 
-	var finish string
+func toolCall(fc *genai.FunctionCall, historyLen, part int) (agentsafe.ToolCall, error) {
+	args, err := json.Marshal(fc.Args)
+	if err != nil {
+		return agentsafe.ToolCall{}, fmt.Errorf("gemini: function call arguments: %w", err)
+	}
+	if fc.Args == nil {
+		args = []byte("{}")
+	}
+	id := fc.ID
+	if id == "" {
+		// Unique within the run and the same on every replay: the history only grows.
+		id = fmt.Sprintf("%s%d-%d", derivedPrefix, historyLen, part)
+	}
+	return agentsafe.ToolCall{ID: id, Type: "function",
+		Function: agentsafe.FunctionCall{Name: fc.Name, Arguments: string(args)}}, nil
+}
+
+// finishReason maps Gemini's finish reason onto agentsafe's: stop, tool_calls, length or refusal. Anything it
+// doesn't know is an error: stop, don't guess.
+func finishReason(cand *genai.Candidate, hasCalls bool) (string, error) {
 	switch cand.FinishReason {
 	case genai.FinishReasonStop, genai.FinishReasonUnspecified, "":
-		finish = "stop"
-		if len(msg.ToolCalls) > 0 {
-			finish = "tool_calls"
+		if hasCalls {
+			return "tool_calls", nil
 		}
+		return "stop", nil
 	case genai.FinishReasonMaxTokens:
-		finish = "length" // truncated: the runner must not take a cut-off answer as the result
+		return "length", nil // truncated: the runner must not take a cut-off answer as the result
 	case genai.FinishReasonSafety, genai.FinishReasonRecitation, genai.FinishReasonBlocklist,
 		genai.FinishReasonProhibitedContent, genai.FinishReasonSPII, genai.FinishReasonImageSafety,
 		genai.FinishReasonImageProhibitedContent, genai.FinishReasonImageRecitation:
-		d := refused(fmt.Sprintf("the response was blocked: %s %s", cand.FinishReason, cand.FinishMessage))
-		d.Message.Native = native
-		return d, nil
-	default: // MALFORMED_FUNCTION_CALL, UNEXPECTED_TOOL_CALL, OTHER, and anything newer: stop, don't guess
-		return agentsafe.Decision{}, fmt.Errorf("gemini: finish reason %s %s", cand.FinishReason, cand.FinishMessage)
+		return "refusal", nil
+	default: // MALFORMED_FUNCTION_CALL, UNEXPECTED_TOOL_CALL, OTHER, and anything newer
+		return "", fmt.Errorf("gemini: finish reason %s %s", cand.FinishReason, cand.FinishMessage)
 	}
-	d := agentsafe.Decision{Message: msg, FinishReason: finish}
-	if u := resp.UsageMetadata; u != nil {
-		d.Usage = agentsafe.Usage{PromptTokens: int(u.PromptTokenCount), CompletionTokens: int(u.CandidatesTokenCount + u.ThoughtsTokenCount)}
-	}
-	return d, nil
 }
 
 func refused(why string) agentsafe.Decision {

@@ -33,21 +33,10 @@ func TestSealedRunNeverWritesContentInTheClear(t *testing.T) {
 	if _, err := r.Approve(context.Background(), st.Waiting.Key, "ops@test"); err != nil || tool.paid != 1 {
 		t.Fatalf("a sealed run must work like any other: err=%v paid=%d", err, tool.paid)
 	}
-	raw, err := os.ReadFile(r.Log.(*FileLog).Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, secret := range []string{"9876543210", "11000", "T1007", "you pay people", "paid"} {
-		if bytes.Contains(raw, []byte(secret)) {
-			t.Fatalf("%q is in the log file in the clear", secret)
-		}
-	}
-	// The audit skeleton stays readable without the key.
-	for _, plain := range []string{`"type":"approval_decided"`, `"by":"ops@test"`, `"decision":"approved"`, `"key":"` + st.Waiting.Key} {
-		if !bytes.Contains(raw, []byte(plain)) {
-			t.Fatalf("%s should stay readable for audit", plain)
-		}
-	}
+	// The content is sealed; the audit skeleton stays readable without the key.
+	assertFile(t, r.Log.(*FileLog).Path,
+		[]string{"9876543210", "11000", "T1007", "you pay people", "paid"},
+		[]string{`"type":"approval_decided"`, `"by":"ops@test"`, `"decision":"approved"`, `"key":"` + st.Waiting.Key})
 	// With the key, the log reads back exactly as the run saw it.
 	events, err := r.Log.Read(context.Background())
 	if err != nil {
@@ -57,15 +46,39 @@ func TestSealedRunNeverWritesContentInTheClear(t *testing.T) {
 	if err != nil || got.Status != StatusFinished {
 		t.Fatalf("opened log must rebuild: err=%v status=%s", err, got.Status)
 	}
-	var seen bool
-	for _, m := range got.Messages {
-		for _, c := range m.ToolCalls {
-			seen = seen || strings.Contains(c.Function.Arguments, "9876543210")
-		}
-	}
-	if !seen {
+	if !argumentsContain(got, "9876543210") {
 		t.Fatal("the opened history must hold the real arguments, not a masked copy")
 	}
+}
+
+// assertFile checks a log file on disk: none of hidden appears in it, all of plain does.
+func assertFile(t *testing.T, path string, hidden, plain []string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range hidden {
+		if bytes.Contains(raw, []byte(secret)) {
+			t.Fatalf("%q is in the log file in the clear", secret)
+		}
+	}
+	for _, p := range plain {
+		if !bytes.Contains(raw, []byte(p)) {
+			t.Fatalf("%s should stay readable for audit", p)
+		}
+	}
+}
+
+func argumentsContain(st State, s string) bool {
+	for _, m := range st.Messages {
+		for _, c := range m.ToolCalls {
+			if strings.Contains(c.Function.Arguments, s) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestSealedRunResumesAfterACrashAndPaysOnce(t *testing.T) {
@@ -175,6 +188,9 @@ func TestSealOpenRoundTripsEveryContentField(t *testing.T) {
 	if _, err := SealEvent(context.Background(), s, k1); err == nil {
 		t.Fatal("sealing twice must fail")
 	}
+}
+
+func TestEventWithNoContentIsNotSealed(t *testing.T) {
 	if n, err := SealEvent(context.Background(), Event{Seq: 1, Type: EvToolStarted, CallID: "c"}, k1); err != nil || n.Sealed != "" {
 		t.Fatal("an event with no content needs no seal")
 	}

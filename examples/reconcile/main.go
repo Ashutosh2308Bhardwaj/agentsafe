@@ -36,58 +36,51 @@ const system = "You reconcile our payout ledger against the bank's settlement fi
 
 var kinds = []string{"amount_mismatch", "missing_in_bank", "missing_in_ledger", "duplicate_in_bank", "duplicate_in_ledger"}
 
-func main() {
-	mock := flag.Bool("mock", false, "use the scripted model (free)")
-	runID := flag.String("run", "", "run id (default: timestamp)")
-	resume := flag.Bool("resume", false, "continue an existing run from its log")
-	extend := flag.Int("extend", 0, "give a paused run this many more steps")
-	maxSteps := flag.Int("steps", 12, "budget for a new run")
-	approve := flag.String("approve", "", "approve the pending operation with this key")
-	reject := flag.String("reject", "", "reject the pending operation with this key")
-	reason := flag.String("reason", "", "why (for -reject)")
-	checkOnly := flag.Bool("check", false, "only reconcile an existing run against the systems of record")
+// options are the command-line flags.
+type options struct {
+	mock, resume, checkOnly bool
+	runID                   string
+	extend, maxSteps        int
+	approve, reject, reason string
+}
+
+func parseFlags() options {
+	var o options
+	flag.BoolVar(&o.mock, "mock", false, "use the scripted model (free)")
+	flag.StringVar(&o.runID, "run", "", "run id (default: timestamp)")
+	flag.BoolVar(&o.resume, "resume", false, "continue an existing run from its log")
+	flag.IntVar(&o.extend, "extend", 0, "give a paused run this many more steps")
+	flag.IntVar(&o.maxSteps, "steps", 12, "budget for a new run")
+	flag.StringVar(&o.approve, "approve", "", "approve the pending operation with this key")
+	flag.StringVar(&o.reject, "reject", "", "reject the pending operation with this key")
+	flag.StringVar(&o.reason, "reason", "", "why (for -reject)")
+	flag.BoolVar(&o.checkOnly, "check", false, "only reconcile an existing run against the systems of record")
 	flag.Parse()
+	if o.runID == "" {
+		o.runID = "g" + time.Now().Format("150405")
+	}
+	return o
+}
 
+func main() {
+	o := parseFlags()
 	here := "examples/reconcile"
-	if *runID == "" {
-		*runID = "g" + time.Now().Format("150405")
-	}
-	out := filepath.Join(here, "out")
+	data, out := filepath.Join(here, "data"), filepath.Join(here, "out")
 	must(os.MkdirAll(out, 0o755))
-	ledger := &Ledger{Path: filepath.Join(out, *runID+"-discrepancies.jsonl")}
-
-	var model agentsafe.Model
-	if *mock || *checkOnly { // -check reads records only; it never calls a model
-		model = scripted(here)
-	} else {
-		key := os.Getenv("GROQ_API_KEY")
-		if key == "" {
-			die(errors.New("GROQ_API_KEY not set (or use -mock)"))
-		}
-		model = &openai.Model{BaseURL: "https://api.groq.com/openai/v1", APIKey: key,
-			Model: "openai/gpt-oss-120b", Logf: logf}
-	}
-
-	gw := gatewayAt(out, *runID)
-	if n, err := strconv.Atoi(os.Getenv("GATEWAY_LOSE_RESPONSES")); err == nil {
-		gw.LoseResponses = n // the gateway charges, then the response is lost (F13 at the money layer)
-	}
-	gw.OnCharged = func() { killHookFn("gateway_charged") }
-	// Silent faults (week 4 S3): each makes a system of record wrong while every report says success.
+	ledger := &Ledger{Path: filepath.Join(out, o.runID+"-discrepancies.jsonl")}
+	gw := gatewayAt(out, o.runID)
 	fault := os.Getenv("SILENT_FAULT")
-	gw.WrongAmount = fault == "gateway_wrong_amount"
-	gw.IgnoreKey = fault == "gateway_ignores_key"
-	ledger.DropNext = fault == "ledger_drops_write" && !*resume && *approve == "" && !*checkOnly
-	var write agentsafe.Tool = &RecordDiscrepancy{Ledger: ledger, Dir: filepath.Join(here, "data")}
+	injectFaults(o, fault, gw, ledger)
+
+	var write agentsafe.Tool = &RecordDiscrepancy{Ledger: ledger, Dir: data}
 	if os.Getenv("NO_IDEMPOTENCY") == "1" { // control experiment: the same write, without the key
 		write = plainTool{write}
 	}
 	who := identity()
-	data := filepath.Join(here, "data")
-	r, err := agentsafe.New(model,
-		&agentsafe.FileLog{Path: filepath.Join(out, *runID+"-log.jsonl"), Codec: logCodec()}, // AGENTSAFE_LOG_KEY: sealed at rest
+	r, err := agentsafe.New(chooseModel(o, here),
+		&agentsafe.FileLog{Path: filepath.Join(out, o.runID+"-log.jsonl"), Codec: logCodec()}, // AGENTSAFE_LOG_KEY: sealed at rest
 		agentsafe.WithTools(&ReadCSV{Dir: data}, &CompareRows{Dir: data}, write, &SendPayout{Dir: data, Gateway: gw}),
-		agentsafe.WithMaxSteps(*maxSteps),
+		agentsafe.WithMaxSteps(o.maxSteps),
 		agentsafe.WithScope(batch(data)), // same input files = same operations, across runs
 		agentsafe.WithLogf(logf),
 		agentsafe.WithRedactor(agentsafe.RedactFields("payee")), // payee names never reach the console
@@ -100,33 +93,16 @@ func main() {
 		agentsafe.WithAuthorizer(agentsafe.All(agentsafe.AllowList(approvers(who)...), agentsafe.NotRequester())),
 	)
 	must(err)
-	var st agentsafe.State
-	if *checkOnly {
+	if o.checkOnly {
 		events, err := r.Log.Read(context.Background())
 		must(err)
-		st, err = agentsafe.Rebuild(events)
+		st, err := agentsafe.Rebuild(events)
 		must(err)
-		fmt.Printf("[%s] CHECK (status %s)\n", *runID, st.Status)
-		printReconciliation(filepath.Join(here, "data"), ledger, gw, r.Log, st)
+		fmt.Printf("[%s] CHECK (status %s)\n", o.runID, st.Status)
+		printReconciliation(data, ledger, gw, r.Log, st)
 		return
 	}
-	switch {
-	case *approve != "":
-		fmt.Printf("[%s] APPROVE %s\n", *runID, *approve)
-		st, err = r.Approve(context.Background(), *approve, who)
-	case *reject != "":
-		fmt.Printf("[%s] REJECT %s\n", *runID, *reject)
-		st, err = r.Reject(context.Background(), *reject, who, *reason)
-	case *extend > 0:
-		fmt.Printf("[%s] EXTEND by %d\n", *runID, *extend)
-		st, err = r.Extend(context.Background(), *extend, who)
-	case *resume:
-		fmt.Printf("[%s] RESUME\n", *runID)
-		st, err = r.Continue(context.Background())
-	default:
-		fmt.Printf("[%s] START\n", *runID)
-		st, err = r.Start(context.Background(), system, "Reconcile the two files.")
-	}
+	st, err := act(context.Background(), r, o, who)
 	if err != nil {
 		die(err)
 	}
@@ -135,6 +111,57 @@ func main() {
 		_, err := gw.Pay("manual-ops-1", "Suresh Iyer", 8000, "T1002")
 		must(err)
 	}
+	report(here, o.runID, ledger, gw, r.Log, st)
+}
+
+// chooseModel is the scripted model for -mock and -check (which never calls a model), Groq otherwise.
+func chooseModel(o options, here string) agentsafe.Model {
+	if o.mock || o.checkOnly {
+		return scripted(here)
+	}
+	key := os.Getenv("GROQ_API_KEY")
+	if key == "" {
+		die(errors.New("GROQ_API_KEY not set (or use -mock)"))
+	}
+	return &openai.Model{BaseURL: "https://api.groq.com/openai/v1", APIKey: key,
+		Model: "openai/gpt-oss-120b", Logf: logf}
+}
+
+// injectFaults sets up the failure experiments chosen by environment variables.
+func injectFaults(o options, fault string, gw *Gateway, ledger *Ledger) {
+	if n, err := strconv.Atoi(os.Getenv("GATEWAY_LOSE_RESPONSES")); err == nil {
+		gw.LoseResponses = n // the gateway charges, then the response is lost (F13 at the money layer)
+	}
+	gw.OnCharged = func() { killHookFn("gateway_charged") }
+	// Silent faults (week 4 S3): each makes a system of record wrong while every report says success.
+	gw.WrongAmount = fault == "gateway_wrong_amount"
+	gw.IgnoreKey = fault == "gateway_ignores_key"
+	ledger.DropNext = fault == "ledger_drops_write" && !o.resume && o.approve == "" && !o.checkOnly
+}
+
+// act does what the flags ask: decide a pending approval, extend, resume, or start a new run.
+func act(ctx context.Context, r *agentsafe.Runner, o options, who string) (agentsafe.State, error) {
+	switch {
+	case o.approve != "":
+		fmt.Printf("[%s] APPROVE %s\n", o.runID, o.approve)
+		return r.Approve(ctx, o.approve, who)
+	case o.reject != "":
+		fmt.Printf("[%s] REJECT %s\n", o.runID, o.reject)
+		return r.Reject(ctx, o.reject, who, o.reason)
+	case o.extend > 0:
+		fmt.Printf("[%s] EXTEND by %d\n", o.runID, o.extend)
+		return r.Extend(ctx, o.extend, who)
+	case o.resume:
+		fmt.Printf("[%s] RESUME\n", o.runID)
+		return r.Continue(ctx)
+	default:
+		fmt.Printf("[%s] START\n", o.runID)
+		return r.Start(ctx, system, "Reconcile the two files.")
+	}
+}
+
+// report prints the score, the gateway's payments, the reconciliation and, if a run waits, the approval screen.
+func report(here, runID string, ledger *Ledger, gw *Gateway, log agentsafe.Log, st agentsafe.State) {
 	score(here, ledger, st)
 	payments, err := gw.Payments()
 	must(err)
@@ -143,12 +170,12 @@ func main() {
 		fmt.Printf("  [%s %s ₹%v ref=%s]", p.PaymentID, p.Payee, p.Amount, p.Ref)
 	}
 	fmt.Println("   (truth: exactly 1, Imran Khan ₹11000 ref=T1007, once approved)")
-	printReconciliation(filepath.Join(here, "data"), ledger, gw, r.Log, st)
+	printReconciliation(filepath.Join(here, "data"), ledger, gw, log, st)
 	if st.Status == agentsafe.StatusAwaitingApproval {
 		// The approval screen, for the approver: the full summary, payee included (you can't approve a payment
 		// without seeing whom it pays). Logf output is masked because logs ship to aggregators and vendors.
 		fmt.Printf("\n⏸  WAITING FOR APPROVAL: %s %s\n\n   to approve, run:\n   go run ./examples/reconcile -run %s -approve %s\n\n   to reject, run:\n   go run ./examples/reconcile -run %s -reject %s -reason \"why\"\n",
-			st.Waiting.Tool, st.Waiting.Summary, *runID, st.Waiting.Key, *runID, st.Waiting.Key)
+			st.Waiting.Tool, st.Waiting.Summary, runID, st.Waiting.Key, runID, st.Waiting.Key)
 	}
 }
 

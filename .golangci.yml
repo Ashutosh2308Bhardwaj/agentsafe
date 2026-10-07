@@ -8,6 +8,7 @@ linters:
     - errorlint
     - exhaustive               # every switch on Status/EventType handles every case
     - gocritic
+    - gocyclo                # Go Report Card's bar: no function over 15
     - gosec
     - misspell
     - nilerr
@@ -16,6 +17,8 @@ linters:
     - unconvert
     - unparam
   settings:
+    gocyclo:
+      min-complexity: 16       # reports complexity > 15, as the Report Card does
     exhaustive:
       default-signifies-exhaustive: true
     revive:

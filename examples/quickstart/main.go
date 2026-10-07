@@ -9,6 +9,7 @@ import (
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 )
 
+// Payout is what the model sends to pay one invoice.
 type Payout struct {
 	InvoiceID string            `json:"invoice_id"`
 	Amount    agentsafe.Decimal `json:"amount"`

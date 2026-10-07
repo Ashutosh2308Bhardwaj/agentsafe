@@ -51,8 +51,7 @@ func writesInARun(t *testing.T, failAt int) int {
 	paid := map[string]int{}
 	actedWithoutRecord := ""
 	recorded := func(ctx context.Context, tool string) {
-		events, err := (&FileLog{Path: path}).Read(ctx)
-		if err != nil || len(events) == 0 || events[len(events)-1].Type != EvToolStarted || events[len(events)-1].Tool != tool {
+		if !startRecorded(ctx, path, tool) {
 			actedWithoutRecord = tool
 		}
 	}
@@ -82,29 +81,6 @@ func writesInARun(t *testing.T, failAt int) int {
 		return r
 	}
 	ctx := context.Background()
-	step := func(r *Runner) (State, error) {
-		events, err := r.Log.Read(ctx)
-		if err != nil {
-			return State{}, err
-		}
-		st, err := Rebuild(events)
-		if err != nil {
-			t.Fatalf("the log must always rebuild, even after a failed write: %v", err)
-		}
-		switch st.Status {
-		case StatusNew:
-			return r.Start(ctx, "sys", "task")
-		case StatusAwaitingApproval:
-			return r.Approve(ctx, st.Waiting.Key, "ops")
-		case StatusPaused:
-			return r.Extend(ctx, 2, "ops")
-		case StatusFinished:
-			return st, nil
-		default:
-			return r.Continue(ctx)
-		}
-	}
-
 	r := runner(flaky)
 	var st State
 	for i := 0; ; i++ {
@@ -112,7 +88,7 @@ func writesInARun(t *testing.T, failAt int) int {
 			t.Fatal("the run never finished")
 		}
 		var err error
-		st, err = step(r)
+		st, err = advance(ctx, t, r)
 		if err != nil {
 			if !errors.Is(err, errDiskFull) {
 				t.Fatalf("write %d: unexpected error %v", failAt, err)
@@ -134,6 +110,41 @@ func writesInARun(t *testing.T, failAt int) int {
 		t.Fatalf("write %d: want one payout key and a finished run, got %d keys, %q", failAt, len(paid), st.Text)
 	}
 	return flaky.n
+}
+
+// startRecorded reports whether the log's last event is tool_started for tool: write-ahead, checked from
+// inside the tool as it acts.
+func startRecorded(ctx context.Context, path, tool string) bool {
+	events, err := (&FileLog{Path: path}).Read(ctx)
+	if err != nil || len(events) == 0 {
+		return false
+	}
+	last := events[len(events)-1]
+	return last.Type == EvToolStarted && last.Tool == tool
+}
+
+// advance does what a process would do next with the run: start, approve, extend or continue it.
+func advance(ctx context.Context, t *testing.T, r *Runner) (State, error) {
+	events, err := r.Log.Read(ctx)
+	if err != nil {
+		return State{}, err
+	}
+	st, err := Rebuild(events)
+	if err != nil {
+		t.Fatalf("the log must always rebuild, even after a failed write: %v", err)
+	}
+	switch st.Status {
+	case StatusNew:
+		return r.Start(ctx, "sys", "task")
+	case StatusAwaitingApproval:
+		return r.Approve(ctx, st.Waiting.Key, "ops")
+	case StatusPaused:
+		return r.Extend(ctx, 2, "ops")
+	case StatusFinished:
+		return st, nil
+	default:
+		return r.Continue(ctx)
+	}
 }
 
 // The other ways a run can be refused before anything happens.

@@ -118,32 +118,14 @@ func (r *Runner) execute(ctx context.Context, tool Tool, c ToolCall, key string)
 	if !json.Valid([]byte(c.Function.Arguments)) {
 		return errorJSON(fmt.Errorf("arguments are not valid JSON: %.80s", c.Function.Arguments)), nil
 	}
-	_, idempotent := tool.(IdempotentTool)
-	idempotent = idempotent && key != ""
-	attempts, backoff := 1, r.ToolBackoff
-	if idempotent {
-		attempts = r.ToolAttempts
-		if attempts <= 0 {
-			attempts = 3
-		}
-		if backoff <= 0 {
-			backoff = 200 * time.Millisecond
-		}
-	}
+	attempts, backoff, idempotent := r.retryPolicy(tool, key)
 
 	var err error
 	for attempt := 1; ; attempt++ {
 		var out any
 		out, err = r.invoke(ctx, tool, c, key)
 		if !errors.Is(err, ErrOutcomeUnknown) {
-			if err != nil {
-				return errorJSON(err), nil // a known failure: it didn't happen
-			}
-			b, merr := json.Marshal(out)
-			if merr != nil {
-				return errorJSON(fmt.Errorf("result not serialisable: %w", merr)), nil
-			}
-			return string(b), nil
+			return resultJSON(out, err), nil
 		}
 		var p *PanicError
 		if errors.As(err, &p) {
@@ -163,4 +145,32 @@ func (r *Runner) execute(ctx context.Context, tool Tool, c ToolCall, key string)
 		backoff *= 2
 	}
 	return "", fmt.Errorf("%w: %s key %s: %w", ErrInDoubt, c.Function.Name, key, err)
+}
+
+// retryPolicy says how often a call may be tried. Only an idempotent tool with a key is retried: the key makes
+// a second attempt safe. Anything else gets one attempt.
+func (r *Runner) retryPolicy(tool Tool, key string) (attempts int, backoff time.Duration, idempotent bool) {
+	if _, ok := tool.(IdempotentTool); !ok || key == "" {
+		return 1, r.ToolBackoff, false
+	}
+	attempts, backoff = r.ToolAttempts, r.ToolBackoff
+	if attempts <= 0 {
+		attempts = 3
+	}
+	if backoff <= 0 {
+		backoff = 200 * time.Millisecond
+	}
+	return attempts, backoff, true
+}
+
+// resultJSON is what the model is told about a known outcome: the result, or the error (it didn't happen).
+func resultJSON(out any, err error) string {
+	if err != nil {
+		return errorJSON(err)
+	}
+	b, merr := json.Marshal(out)
+	if merr != nil {
+		return errorJSON(fmt.Errorf("result not serialisable: %w", merr))
+	}
+	return string(b)
 }

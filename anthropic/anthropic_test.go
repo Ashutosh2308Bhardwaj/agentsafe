@@ -161,20 +161,9 @@ func TestReplayIsAppendOnlyAcrossApprovalRestartAndCrash(t *testing.T) {
 	}
 
 	// Process 2 approves, and crashes right after the payout's result is logged.
-	crashed := false
-	p2 := newRunner(t, api, srv, path, l, func(p string) {
-		if p == "after_result_logged" && !crashed {
-			crashed = true
-			panic("kill -9")
-		}
-	})
-	func() {
-		defer func() { _ = recover() }()
-		_, _ = p2.Approve(ctx, st.Waiting.Key, "ops")
-	}()
-	if !crashed {
-		t.Fatal("setup: the crash didn't happen")
-	}
+	approveAndCrash(ctx, t, func(hook func(string)) *agentsafe.Runner {
+		return newRunner(t, api, srv, path, l, hook)
+	}, st.Waiting.Key)
 
 	// Process 3 resumes.
 	st, err = newRunner(t, api, srv, path, l, nil).Continue(ctx)
@@ -185,17 +174,40 @@ func TestReplayIsAppendOnlyAcrossApprovalRestartAndCrash(t *testing.T) {
 		t.Fatalf("want 3 requests, 1 payout, 2 reads: got %d, %d, %d", len(api.requests), len(l.paid), l.reads)
 	}
 
-	// The replayed turns carry Claude's thinking blocks, signature intact.
-	var msgs []map[string]any
-	_ = json.Unmarshal(api.requests[2]["messages"], &msgs)
-	if !strings.Contains(string(api.requests[2]["messages"]), "sig-1-bound-to-the-first-request") ||
-		!strings.Contains(string(api.requests[2]["messages"]), "sig-2") {
+	assertReplayed(t, api.requests[2]["messages"])
+}
+
+// approveAndCrash approves in a new process that is killed right after the payout's result is logged.
+func approveAndCrash(ctx context.Context, t *testing.T, newProcess func(hook func(string)) *agentsafe.Runner, key string) {
+	t.Helper()
+	crashed := false
+	p := newProcess(func(point string) {
+		if point == "after_result_logged" && !crashed {
+			crashed = true
+			panic("kill -9")
+		}
+	})
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = p.Approve(ctx, key, "ops")
+	}()
+	if !crashed {
+		t.Fatal("setup: the crash didn't happen")
+	}
+}
+
+// assertReplayed checks the last request's messages: thinking blocks replayed with their signatures, and the
+// two parallel results in ONE user message, in call order.
+func assertReplayed(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	if !strings.Contains(string(raw), "sig-1-bound-to-the-first-request") || !strings.Contains(string(raw), "sig-2") {
 		t.Fatal("thinking blocks must be replayed with their signatures")
 	}
-	// Parallel calls: both results in ONE user message, in call order.
+	var msgs []map[string]any
+	_ = json.Unmarshal(raw, &msgs)
 	results, _ := json.Marshal(msgs[2])
-	if msgs[2]["role"] != "user" || strings.Index(string(results), "toolu_a") > strings.Index(string(results), "toolu_b") ||
-		!strings.Contains(string(results), "toolu_b") {
+	r := string(results)
+	if msgs[2]["role"] != "user" || !strings.Contains(r, "toolu_b") || strings.Index(r, "toolu_a") > strings.Index(r, "toolu_b") {
 		t.Fatalf("the two parallel results must come back in one user message, in order: %s", results)
 	}
 }

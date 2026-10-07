@@ -24,50 +24,59 @@ func expectedFromFiles(dir string) ([]reconcile.Effect, error) {
 	if err != nil {
 		return nil, err
 	}
-	L, B := map[string][]map[string]string{}, map[string][]map[string]string{}
-	ids := map[string]bool{}
-	for _, r := range ledger {
-		L[r["txn_id"]] = append(L[r["txn_id"]], r)
-		ids[r["txn_id"]] = true
-	}
-	for _, r := range bank {
-		B[r["txn_id"]] = append(B[r["txn_id"]], r)
-		ids[r["txn_id"]] = true
-	}
-	var sorted []string
-	for id := range ids {
-		sorted = append(sorted, id)
-	}
-	sort.Strings(sorted)
-
+	byTxn, ids := groupByTxn(ledger, bank)
 	var out []reconcile.Effect
-	// Amounts are compared as the source files state them: exact decimals, never through a float.
-	disc := func(txn, kind string, l, b []map[string]string) {
+	for _, txn := range ids {
+		out = append(out, expectedFor(txn, byTxn[txn][0], byTxn[txn][1])...)
+	}
+	return out, nil
+}
+
+// groupByTxn indexes both files' rows by txn_id ([0] ledger, [1] bank), with the ids in sorted order.
+func groupByTxn(ledger, bank []map[string]string) (map[string][2][]map[string]string, []string) {
+	byTxn := map[string][2][]map[string]string{}
+	for side, rows := range [][]map[string]string{ledger, bank} {
+		for _, r := range rows {
+			g := byTxn[r["txn_id"]]
+			g[side] = append(g[side], r)
+			byTxn[r["txn_id"]] = g
+		}
+	}
+	ids := make([]string, 0, len(byTxn))
+	for id := range byTxn {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return byTxn, ids
+}
+
+// expectedFor is every effect one transaction should have produced: its discrepancies and, if the bank never
+// settled it, a re-issue payment. Amounts are compared as the source files state them: exact decimals, never
+// through a float.
+func expectedFor(txn string, l, b []map[string]string) []reconcile.Effect {
+	var out []reconcile.Effect
+	disc := func(kind string, l, b []map[string]string) {
 		out = append(out, reconcile.Effect{ID: "discrepancy:" + txn + ":" + kind, Kind: "discrepancy",
 			Fields: map[string]any{"ledger_amount": decimalOf(l), "bank_amount": decimalOf(b)}})
 	}
-	for _, txn := range sorted {
-		l, b := L[txn], B[txn]
-		la, ba := amountOf(l), amountOf(b)
-		switch {
-		case len(l) > 0 && len(b) == 0:
-			disc(txn, "missing_in_bank", l, nil)
-			out = append(out, reconcile.Effect{ID: "payment:reissue:" + txn, Kind: "payment", Gated: true,
-				Fields: map[string]any{"payee": l[0]["payee"], "amount_inr": decimalOf(l)}})
-		case len(l) == 0 && len(b) > 0:
-			disc(txn, "missing_in_ledger", nil, b)
-		}
-		if len(b) > 1 {
-			disc(txn, "duplicate_in_bank", l, b)
-		}
-		if len(l) > 1 {
-			disc(txn, "duplicate_in_ledger", l, b)
-		}
-		if la != nil && ba != nil && *la != *ba {
-			disc(txn, "amount_mismatch", l, b)
-		}
+	switch {
+	case len(l) > 0 && len(b) == 0:
+		disc("missing_in_bank", l, nil)
+		out = append(out, reconcile.Effect{ID: "payment:reissue:" + txn, Kind: "payment", Gated: true,
+			Fields: map[string]any{"payee": l[0]["payee"], "amount_inr": decimalOf(l)}})
+	case len(l) == 0 && len(b) > 0:
+		disc("missing_in_ledger", nil, b)
 	}
-	return out, nil
+	if len(b) > 1 {
+		disc("duplicate_in_bank", l, b)
+	}
+	if len(l) > 1 {
+		disc("duplicate_in_ledger", l, b)
+	}
+	if la, ba := amountOf(l), amountOf(b); la != nil && ba != nil && *la != *ba {
+		disc("amount_mismatch", l, b)
+	}
+	return out
 }
 
 // actualFromRecords reads what DOES exist: the ledger file and the gateway's payments.

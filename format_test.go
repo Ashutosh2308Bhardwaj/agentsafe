@@ -54,19 +54,30 @@ func TestGoldenLogsStillRebuild(t *testing.T) {
 			if err != nil {
 				t.Fatalf("a log already on disk no longer rebuilds: %v", err)
 			}
-			approved := 0
-			for _, d := range st.ByKey {
-				if d == "approved" {
-					approved++
-				}
-			}
-			if st.Events != g.events || st.Step != g.step || len(st.Effects) != g.effects || len(st.Messages) != g.msgs ||
-				st.Status != g.status || st.Stop != g.stop || approved != g.approvedOps || st.Denials != g.denials {
-				t.Fatalf("rebuilt state changed: events=%d step=%d effects=%d msgs=%d status=%s stop=%s approved=%d denials=%d",
-					st.Events, st.Step, len(st.Effects), len(st.Messages), st.Status, st.Stop, approved, st.Denials)
+			want := goldenShape{g.events, g.step, g.effects, g.msgs, g.status, g.stop, g.approvedOps, g.denials}
+			if got := shapeOf(st); got != want {
+				t.Fatalf("rebuilt state changed:\n got %+v\nwant %+v", got, want)
 			}
 		})
 	}
+}
+
+// goldenShape is what a golden log must rebuild to.
+type goldenShape struct {
+	Events, Step, Effects, Msgs int
+	Status                      Status
+	Stop                        string
+	ApprovedOps, Denials        int
+}
+
+func shapeOf(st State) goldenShape {
+	approved := 0
+	for _, d := range st.ByKey {
+		if d == "approved" {
+			approved++
+		}
+	}
+	return goldenShape{st.Events, st.Step, len(st.Effects), len(st.Messages), st.Status, st.Stop, approved, st.Denials}
 }
 
 func TestNewerFormatIsRefusedNotGuessed(t *testing.T) {

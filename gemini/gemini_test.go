@@ -154,20 +154,9 @@ func TestReplayIsAppendOnlyAcrossApprovalRestartAndCrash(t *testing.T) {
 	if err != nil || st.Status != agentsafe.StatusAwaitingApproval {
 		t.Fatalf("err=%v status=%s", err, st.Status)
 	}
-	crashed := false
-	p2 := newRunner(t, srv, path, l, func(p string) {
-		if p == "after_result_logged" && !crashed {
-			crashed = true
-			panic("kill -9")
-		}
-	})
-	func() {
-		defer func() { _ = recover() }()
-		_, _ = p2.Approve(ctx, st.Waiting.Key, "ops")
-	}()
-	if !crashed {
-		t.Fatal("setup: the crash didn't happen")
-	}
+	approveAndCrash(ctx, t, func(hook func(string)) *agentsafe.Runner {
+		return newRunner(t, srv, path, l, hook)
+	}, st.Waiting.Key)
 	st, err = newRunner(t, srv, path, l, nil).Continue(ctx)
 	if err != nil || st.Status != agentsafe.StatusFinished {
 		t.Fatalf("resume must be accepted: err=%v status=%s", err, st.Status)
@@ -179,7 +168,33 @@ func TestReplayIsAppendOnlyAcrossApprovalRestartAndCrash(t *testing.T) {
 		t.Fatalf("stateless generateContent expected, got %s", api.paths[0])
 	}
 
-	last := string(api.requests[2]["contents"])
+	assertReplayed(t, api.requests[2]["contents"])
+}
+
+// approveAndCrash approves in a new process that is killed right after the payout's result is logged.
+func approveAndCrash(ctx context.Context, t *testing.T, newProcess func(hook func(string)) *agentsafe.Runner, key string) {
+	t.Helper()
+	crashed := false
+	p := newProcess(func(point string) {
+		if point == "after_result_logged" && !crashed {
+			crashed = true
+			panic("kill -9")
+		}
+	})
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = p.Approve(ctx, key, "ops")
+	}()
+	if !crashed {
+		t.Fatal("setup: the crash didn't happen")
+	}
+}
+
+// assertReplayed checks the last request's contents: model turns verbatim (signatures, thoughts), no made-up
+// ids, parallel responses in one user turn, and Gemini's own call id echoed.
+func assertReplayed(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	last := string(raw)
 	for _, want := range []string{"c2lnLWZpcnN0LWNhbGw=", "c2lnLXBheQ==", `"thought":true`} {
 		if !strings.Contains(last, want) {
 			t.Errorf("model turns must be replayed verbatim (missing %s)", want)
@@ -189,7 +204,7 @@ func TestReplayIsAppendOnlyAcrossApprovalRestartAndCrash(t *testing.T) {
 		t.Error("ids the adapter made up must never be sent to Gemini")
 	}
 	var contents []map[string]any
-	_ = json.Unmarshal(api.requests[2]["contents"], &contents)
+	_ = json.Unmarshal(raw, &contents)
 	reads, _ := json.Marshal(contents[2])
 	if contents[2]["role"] != "user" || strings.Count(string(reads), "functionResponse") != 2 ||
 		!strings.Contains(string(reads), `"result":"INV-1 4200.50"`) {
