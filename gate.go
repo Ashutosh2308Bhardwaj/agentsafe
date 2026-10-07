@@ -72,7 +72,7 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 	if v, ok := tool.(Validator); ok && !st.Started[c.ID] {
 		if verr := v.Validate(ctx, args); verr != nil {
 			res := errorJSON(fmt.Errorf("refused before execution: %w", verr))
-			r.logf("    ✗ %s(%.60s) refused: %s", c.Function.Name, r.show(c.Function.Arguments), r.show(verr.Error()))
+			r.logf("    ✗ %s(%s) refused: %s", c.Function.Name, clip(r.show(c.Function.Arguments), 60), r.show(verr.Error()))
 			return false, r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key})
 		}
 	}

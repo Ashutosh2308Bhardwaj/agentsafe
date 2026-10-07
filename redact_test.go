@@ -95,3 +95,12 @@ func TestRefusalReasonsAreRedactedOnTheConsole(t *testing.T) {
 		t.Fatalf("refused call printed unmasked:\n%s", out.String())
 	}
 }
+
+func TestConsoleMarksWhereItCutsAValue(t *testing.T) {
+	if got := clip(`{"amount":"12000.00"}`, 12); got != `{"amount":"1…` {
+		t.Fatalf("a cut value must say it was cut: %q", got)
+	}
+	if got := clip(`{"a":1}`, 12); got != `{"a":1}` {
+		t.Fatalf("short text is left alone: %q", got)
+	}
+}

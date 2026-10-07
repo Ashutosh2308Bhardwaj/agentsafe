@@ -201,7 +201,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 			if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph, Replayed: true}); err != nil {
 				return err
 			}
-			r.logf("    %s(%.60s) -> %s from the log: %.80s", c.Function.Name, r.show(c.Function.Arguments), how, r.show(result))
+			r.logf("    %s(%s) -> %s from the log: %s", c.Function.Name, clip(r.show(c.Function.Arguments), 60), how, clip(r.show(result), 80))
 			r.hook("after_result_logged")
 			return nil
 		}
@@ -230,7 +230,7 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 	if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph}); err != nil {
 		return err
 	}
-	r.logf("    %s(%.70s) -> %.90s", c.Function.Name, r.show(c.Function.Arguments), r.show(result))
+	r.logf("    %s(%s) -> %s", c.Function.Name, clip(r.show(c.Function.Arguments), 70), clip(r.show(result), 90))
 	r.hook("after_result_logged")
 	return nil
 }
@@ -317,4 +317,13 @@ func copyMap(m map[string]bool) map[string]bool {
 		out[k] = v
 	}
 	return out
+}
+
+// clip shortens console text to n characters, marking the cut: a value cut silently mid-number reads as a
+// different value.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
