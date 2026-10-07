@@ -85,7 +85,7 @@ func (r *Runner) Validate() error {
 	}
 	if r.Log == nil {
 		bad("no Log")
-	} else if _, ok := r.Log.(Locker); !ok && !r.Unlocked {
+	} else if !canLock(r.Log) && !r.Unlocked {
 		bad("the Log has no lease (Locker); use a Log that has one, or WithoutLease to rely on fencing alone (%w)", ErrNoLocker)
 	}
 	if r.MaxSteps < 0 || r.ToolTimeout < 0 || r.ToolAttempts < 0 || r.ToolBackoff < 0 {

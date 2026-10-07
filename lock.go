@@ -27,6 +27,18 @@ type Locker interface {
 	Lock(ctx context.Context) (unlock func() error, err error)
 }
 
+// canLock reports whether a Log can take a lease. A Log whose Lock depends on what it wraps (a Journal over a
+// store with or without one) says so with CanLock, so New refuses it up front instead of the first Start.
+func canLock(l Log) bool {
+	if _, ok := l.(Locker); !ok {
+		return false
+	}
+	if c, ok := l.(interface{ CanLock() bool }); ok {
+		return c.CanLock()
+	}
+	return true
+}
+
 // lock takes the run's lock for the duration of one Start / Continue / Extend / Approve / Reject call.
 func (r *Runner) lock(ctx context.Context) (func(), error) {
 	// Every entry point comes through here first: a Runner written as a struct literal gets the same checks

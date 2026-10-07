@@ -110,3 +110,18 @@ func TestStructLiteralRunnerIsValidatedBeforeItActs(t *testing.T) {
 		t.Fatalf("a log with no lease is still ErrNoLocker, now also ErrConfig: %v", err)
 	}
 }
+
+// A Journal always has a Lock method, but only takes a lease if its store has one: New must look through it.
+func TestNewRefusesAJournalWhoseStoreCantLock(t *testing.T) {
+	model := &ScriptedModel{Final: "x"}
+	_, err := New(model, &Journal{Store: memStore{}})
+	if !errors.Is(err, ErrConfig) || !errors.Is(err, ErrNoLocker) {
+		t.Fatalf("a Journal over a store without a lease must be refused by New, got %v", err)
+	}
+	if _, err := New(model, &Journal{Store: memStore{}}, WithoutLease()); err != nil {
+		t.Fatalf("WithoutLease is the explicit way to run on fencing alone: %v", err)
+	}
+	if _, err := New(model, &FileLog{Path: filepath.Join(t.TempDir(), "r.jsonl")}); err != nil {
+		t.Fatalf("a FileLog has a lease: %v", err)
+	}
+}

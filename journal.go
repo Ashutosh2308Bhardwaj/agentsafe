@@ -102,6 +102,13 @@ func (j *Journal) Head(ctx context.Context) (string, error) {
 	return j.link(last(lines)), nil
 }
 
+// CanLock reports whether the store has a lease (implements Locker). Runner.Validate asks, so a Journal over
+// a store without one is refused by New, not at the first Start.
+func (j *Journal) CanLock() bool {
+	_, ok := j.Store.(Locker)
+	return ok
+}
+
 // Lock takes the store's lease when it has one (Locker). Afterwards the next append re-reads the run:
 // another runner may have written while this one didn't hold the lease.
 func (j *Journal) Lock(ctx context.Context) (func() error, error) {

@@ -17,6 +17,13 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 - Log format v4. A v0.2 library refuses v4 logs (`ErrNewerLogFormat`): don't roll back a library under a
   run that a newer one has written to.
 
+### Fixed
+
+- `openai.Model` is safe for concurrent use: runners sharing one Model raced on its rate-limit state
+  (`TestOpenAIModelIsSafeForConcurrentUse`, under `-race`).
+- `New` refuses a `Journal` whose store has no lease (unless `WithoutLease`). A Journal always has a `Lock`
+  method, so it passed validation and failed at the first `Start` instead. `Journal.CanLock` reports it.
+
 ### Security
 
 - `gemini`: indirect dependencies upgraded past known advisories: `golang.org/x/crypto` v0.56.0 (GO-2026-6354,
