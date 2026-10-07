@@ -174,6 +174,7 @@ Each runs offline (scripted model, fake external system), and each has a test th
 |---|---|---|
 | [quickstart](examples/quickstart) | A payout must wait for a human, across restarts | The run waits durably at the approval gate; approving in a new process pays once |
 | [refund](examples/refund) | The model proposes the wrong amount; the wrong person approves; the process dies right after the money moved | `Check` refuses the amount against the real charge; the `Authorizer` and maker-checker refuse the approvers; the refund is retried with its key: one refund. Without the key: two |
+| [outbox](sqlite/examples/outbox) | Killed after a database write, before the agent logged it; killed between the write and its email | The credit, its key and its email commit in one transaction; the outbox worker resends with a key; reconciliation fails the control run |
 | [subscription](examples/subscription) | An HTTP call times out, or the process dies, right after the API made a billed change | The unknown outcome is retried with the same idempotency key: one invoice. Without the key: two |
 | [reconcile](examples/reconcile) | A model reconciling a ledger gets values wrong; a gateway under-pays or drops a write | Grounding refuses wrong values; the approval gate; reconciliation catches what every report missed |
 
