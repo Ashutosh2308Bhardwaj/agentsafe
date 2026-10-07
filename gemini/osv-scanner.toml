@@ -1,0 +1,6 @@
+# GO-2026-5932 flags every version of golang.org/x/crypto: its openpgp packages are unmaintained and will
+# never get a fix. Nothing in this module (or its dependency graph's reachable code) imports openpgp;
+# govulncheck, which checks reachability, reports nothing. Revisit if an import of openpgp ever appears.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "golang.org/x/crypto/openpgp is never imported; the advisory has no fixed version (unmaintained package)"

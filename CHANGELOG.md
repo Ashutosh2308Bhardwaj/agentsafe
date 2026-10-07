@@ -6,6 +6,16 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Security
+
+- `gemini`: indirect dependencies upgraded past known advisories: `golang.org/x/crypto` v0.56.0 (GO-2026-6354,
+  GO-2026-6355 and 13 earlier ones), `golang.org/x/net` v0.58.0 (GO-2026-5942), `google.golang.org/grpc` v1.83.2
+  (GO-2026-6443). None was reachable from agentsafe's code (govulncheck), but they showed up in every user's
+  dependency scan. **`gemini` now requires Go 1.26** (x/crypto v0.56.0 does); Go 1.25 left upstream support
+  when Go 1.27 was released. GO-2026-5932 (x/crypto `openpgp`, no fix will ever exist) is ignored in
+  `gemini/osv-scanner.toml`: nothing imports `openpgp`.
+- `postgres`: `golang.org/x/text` v0.39.0 (GO-2026-5970).
+
 ## [0.2.0] - 2026-10-06
 
 A restructure before the API settles: the core package is split, the largest functions are broken up, and a
