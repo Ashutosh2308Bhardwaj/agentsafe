@@ -3,7 +3,7 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directories: ["/", "/sqlite", "/postgres", "/anthropic", "/gemini"]
+    directories: ["/", "/sqlite", "/postgres", "/anthropic", "/gemini", "/mcp"]
     schedule: { interval: weekly }
     groups:
       go-modules: { patterns: ["*"] }

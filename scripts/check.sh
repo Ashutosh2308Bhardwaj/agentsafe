@@ -27,7 +27,7 @@ step "crash harness (sealed log)"; AGENTSAFE_LOG_KEY=424242424242424242424242424
 # go.mod requires (which stays as users see it).
 ws="$(mktemp -d)"
 trap 'rm -rf "${ws:?}"' EXIT
-for m in sqlite postgres anthropic gemini; do
+for m in sqlite postgres anthropic gemini mcp; do
   step "backend $m: vet, lint, staticcheck, govulncheck, tests (race)"
   (cd "$ws" && rm -f go.work && GOTOOLCHAIN=auto go work init "$OLDPWD" "$OLDPWD/$m" >/dev/null)
   export GOWORK="$ws/go.work"
