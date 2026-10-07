@@ -2,9 +2,9 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
-**Current: 33 / 35 → 94 / 100** (after step 6.4, v0.1.0 released)
+**Current: 34 / 35 → 97 / 100** (after step 6.5, Report Card checks in CI)
 
-History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71 → 5.2 property tests 74 → 5.3 coverage 77 → 6.1 security + contributing 83 → 6.2 threat model 86 → 6.3 design doc 89 → 6.4 v0.1.0 94
+History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71 → 5.2 property tests 74 → 5.3 coverage 77 → 6.1 security + contributing 83 → 6.2 threat model 86 → 6.3 design doc 89 → 6.4 v0.1.0 94 → 6.5 Report Card checks 97
 
 ## Correctness (5/5)
 - [x] `go test -race` clean on every package
@@ -24,12 +24,12 @@ History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails
 - [x] Per-tool timeouts and panic recovery: `exec.go`, `exec_test.go`; unknown outcome ≠ failure (idempotent: same-key retry, then `ErrInDoubt` with nothing logged; others: model told it's unknown); panics recovered, never auto-retried
 - [x] Typed field comparison in `reconcile.Audit` (no `"4200" == 4200`): `compare.go` `Same` + `Decimal`; missing ≠ null; float drift reported; claims typed too
 
-## Quality gates (5/7)
+## Quality gates (6/7)
 - [x] golangci-lint (strict config) clean
 - [x] staticcheck clean
 - [x] govulncheck clean (CI, latest Go)
 - [x] gofmt clean
-- [ ] Go Report Card A+ (needs the public repo)
+- [x] Go Report Card A+: the service was sunset in 2026 (goreportcard.com now points to golangci-lint), so no public badge can be earned. Redefined as the same bar, enforced in CI on every module and every commit instead of graded once: `gofmt -s`, `go vet`, gocyclo ≤ 15 (golangci-lint `gocyclo`), ineffassign, misspell, golint's rules (revive `exported`, `var-naming`; golint itself run clean once by hand), LICENSE. Zero functions over 15, tests included (step 6.5)
 - [ ] OpenSSF Scorecard ≥ 8 (needs the public repo, branch protection, pinned actions, SECURITY.md)
 - [x] CI green on Linux, macOS and Windows × Go 1.23 and stable
 
