@@ -2,6 +2,8 @@
 
 "Production grade" made measurable: 35 pass/fail items. **Score = items passing ÷ 35 × 100.** An item passes only when it's verifiable (a CI job, a test, a file, a public badge); "in progress" and "written but not yet run" count as not passing.
 
+What this measures is how the library is *built*. None of these items can show it has been *deployed*: until someone other than its author runs it in production, agentsafe is production-engineered, not production-proven.
+
 **Current: 34 / 35 → 97 / 100** (after step 6.5, Report Card checks in CI)
 
 History: baseline 20 → 2.1 lease 29 → 2.2 log versions 31 → 2.3 torn tails 34 → 2.4 hash chain 37 → 2.5 authorizer 40 → 2.6 sealing + redaction 43 → 2.7 timeouts 46 → 2.8 typed reconcile 49 → 3 storage backends 51 → 4.1 idiomatic API 54 → 4.2 tool middleware 57 → 4.3 Anthropic 60 → 4.4 Gemini 63 → 4.5 examples 66 → 4.6 quickstart 69 → 5.1 fuzzing 71 → 5.2 property tests 74 → 5.3 coverage 77 → 6.1 security + contributing 83 → 6.2 threat model 86 → 6.3 design doc 89 → 6.4 v0.1.0 94 → 6.5 Report Card checks 97
