@@ -46,10 +46,12 @@ type DB struct {
 }
 
 // Open opens (creating if needed) a database file with the settings agentsafe relies on: WAL, every commit
-// fsync'd (synchronous=FULL), and waiting up to 10s for another writer instead of failing.
+// flushed to stable storage (synchronous=FULL, plus fullfsync: on macOS a plain fsync leaves the commit in
+// the drive's cache, where a power cut loses it; other platforms ignore the pragma), and waiting up to 10s
+// for another writer instead of failing.
 func Open(path string) (*DB, error) {
 	q := url.Values{}
-	for _, p := range []string{"busy_timeout(10000)", "journal_mode(WAL)", "synchronous(FULL)"} {
+	for _, p := range []string{"busy_timeout(10000)", "journal_mode(WAL)", "synchronous(FULL)", "fullfsync(1)"} {
 		q.Add("_pragma", p)
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())

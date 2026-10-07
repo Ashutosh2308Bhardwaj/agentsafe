@@ -158,3 +158,15 @@ func TestRunCrashesAndResumesOnSQLite(t *testing.T) {
 		t.Fatalf("resume on SQLite: err=%v status=%s tool ran %d times", err, st.Status, tool.n)
 	}
 }
+
+// The durability settings are pragmas in a connection string: a typo would silently weaken them. Read them
+// back from a connection.
+func TestOpenSetsTheDurabilitySettings(t *testing.T) {
+	d := open(t, filepath.Join(t.TempDir(), "runs.db"))
+	for pragma, want := range map[string]string{"journal_mode": "wal", "synchronous": "2", "fullfsync": "1"} {
+		var got string
+		if err := d.db.QueryRow("PRAGMA " + pragma).Scan(&got); err != nil || got != want {
+			t.Errorf("PRAGMA %s = %q (err %v), want %q", pragma, got, err, want)
+		}
+	}
+}
