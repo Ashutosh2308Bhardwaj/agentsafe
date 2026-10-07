@@ -44,6 +44,8 @@ type Runner struct {
 	// Unlocked runs without a single-driver guarantee when the Log doesn't implement Locker. Off by default:
 	// running a run from two processes at once must be a visible choice, not a silent gap.
 	Unlocked bool
+
+	last Event // the last event emit wrote: how a Gateway learns what became of a call
 }
 
 // Start begins a new run. It refuses a log that already has events.
@@ -275,6 +277,7 @@ func (r *Runner) emit(ctx context.Context, st *State, e Event) error {
 		return fmt.Errorf("log append: %w", err)
 	}
 	*st = check
+	r.last = e
 	return nil
 }
 

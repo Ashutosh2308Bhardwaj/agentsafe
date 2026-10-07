@@ -11,6 +11,11 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 - **Proxy runs** (log format v5): `run_started` with `kind: "proxy"` and the `call_received` event, for calls that
   arrive from outside a `Runner` (the MCP proxy, [docs/MCP_PROXY.md](docs/MCP_PROXY.md)). A proxy run stays
   `open` between calls; agent and proxy events can't mix in one run. A v0.3 library refuses v5 logs.
+- `Gateway` (`OpenGateway`, `Call`, `Close`): tool calls that arrive from outside an agent loop get the
+  Runner's guarantees: logged before they run, a repeated operation answered from the log, conflicts, keys.
+  It holds the log's lease while open, and on open settles a call a crash left unfinished: refused if it was
+  never forwarded, retried with its key if the tool takes one, otherwise recorded as an unknown outcome and
+  never run again. Approvals through a Gateway come later; a gated tool is refused at `OpenGateway`.
 
 ## [0.3.0] - 2026-10-07
 
