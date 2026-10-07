@@ -145,6 +145,7 @@ Full tables in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 - **The fix is what works, not luck.** Same 172 random kills, same model decisions: **27 duplicate writes → 0** when the effect and its key can't be separated. Disable the key at the gap point and the duplicate comes straight back.
 - **Wrong values never land.** 6 of 8 real runs proposed a wrong amount; **0 were written**. Each was refused and corrected in the next step.
 - **Silent failures get caught.** A gateway that under-pays, a ledger that drops a write, a gateway that ignores idempotency keys, a payment made outside the agent: in every case the agent's report, the tool results and the trace all looked clean. **The checker caught 4/4.** In 3 of the 4, the fault was in the *other* system.
+- **The safety is cheap where it counts.** About **16 µs of CPU per tool call**, plus three durable log writes; the writes cost what your disk's `fsync` costs. Resuming a 1,000-event run takes about 3 ms. Numbers and how to reproduce them: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## What it doesn't do
 

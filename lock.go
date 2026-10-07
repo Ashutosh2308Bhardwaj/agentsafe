@@ -46,14 +46,13 @@ func (r *Runner) lock(ctx context.Context) (func(), error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	lk, ok := r.Log.(Locker)
-	if !ok {
+	if !canLock(r.Log) { // not just "has a Lock method": a Journal has one whatever its store can do
 		if r.Unlocked {
 			return func() {}, nil
 		}
 		return nil, ErrNoLocker
 	}
-	unlock, err := lk.Lock(ctx)
+	unlock, err := r.Log.(Locker).Lock(ctx)
 	if err != nil {
 		return nil, err
 	}

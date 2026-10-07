@@ -125,3 +125,14 @@ func TestNewRefusesAJournalWhoseStoreCantLock(t *testing.T) {
 		t.Fatalf("a FileLog has a lease: %v", err)
 	}
 }
+
+// WithoutLease must actually let such a Journal run: Start used to call its Lock anyway and fail.
+func TestJournalWithoutALeaseRunsWithWithoutLease(t *testing.T) {
+	r, err := New(&ScriptedModel{Final: "done"}, &Journal{Store: &memLines{}}, WithoutLease())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := r.Start(context.Background(), "sys", "task"); err != nil || st.Status != StatusFinished {
+		t.Fatalf("err=%v status=%s", err, st.Status)
+	}
+}

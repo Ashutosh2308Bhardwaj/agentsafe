@@ -17,10 +17,19 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 - Log format v4. A v0.2 library refuses v4 logs (`ErrNewerLogFormat`): don't roll back a library under a
   run that a newer one has written to.
 
+### Added
+
+- Benchmarks (`bench_test.go`, `reconcile/bench_test.go`, `sqlite/bench_test.go`) and
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md): about 16 µs of CPU per tool call plus three durable writes.
+
 ### Fixed
 
 - `openai.Model` is safe for concurrent use: runners sharing one Model raced on its rate-limit state
   (`TestOpenAIModelIsSafeForConcurrentUse`, under `-race`).
+- A `Journal` over a store without a lease could never run, even with `WithoutLease`: `Start` called its
+  `Lock` anyway and failed with `ErrNoLocker`. Found by the new benchmarks.
+- `sqlite`: `Open` sets `fullfsync`. On macOS, SQLite's `synchronous=FULL` issues a plain `fsync`, which
+  leaves a commit in the drive's cache, where a power cut loses it. Other platforms ignore the pragma.
 - `New` refuses a `Journal` whose store has no lease (unless `WithoutLease`). A Journal always has a `Lock`
   method, so it passed validation and failed at the first `Start` instead. `Journal.CanLock` reports it.
 
