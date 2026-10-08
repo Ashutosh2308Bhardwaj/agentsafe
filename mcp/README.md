@@ -45,6 +45,10 @@ and only with a policy.
 - **A crash mid-call is settled, never repeated.** A call the proxy hadn't forwarded is recorded as refused
   (nothing was done); a call it had forwarded is recorded as an unknown outcome and **not** retried, because
   MCP has no idempotency key and the upstream can't deduplicate.
+- **The client's `_meta` travels to the server** (a trace context, say), recorded with the call so a retry after a
+  crash sends the same. Not forwarded: what belongs to the client's own connection (keys under a reserved MCP
+  prefix, such as its protocol version, client info and capabilities; `progressToken`), and agentsafe's namespace,
+  which only the proxy writes. Metadata isn't part of the operation: a new trace id on a retry is still a replay.
 - The log's lease is taken per call: proxies in several processes can share one log, their calls taking turns.
 
 With a policy for a tool:
@@ -81,6 +85,6 @@ With `approval: always`:
 
 ## Not yet
 
-`resolve` (a person recording what became of an unknown outcome), forwarding the client's `_meta`, a verifier that
+`resolve` (a person recording what became of an unknown outcome), a verifier that
 a server really deduplicates on its key, choosing SQLite / Postgres / sealing from the binary (the library takes any
 `agentsafe.Log`), several upstreams, and Streamable HTTP. See the design.

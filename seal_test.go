@@ -170,12 +170,12 @@ func TestSealOpenRoundTripsEveryContentField(t *testing.T) {
 	e := Event{V: FormatVersion, Seq: 7, Type: EvModelDecided, CallID: "c", Tool: "pay", Key: "k", By: "ops",
 		System: "s", Task: "t", Message: &Message{Role: RoleAssistant, Content: Str("hi"),
 			ToolCalls: []ToolCall{{ID: "c", Type: "function", Function: FunctionCall{Name: "pay", Arguments: sealedArgs}}}},
-		Args: "a", Result: "r", Summary: "{}", Text: "x", Reason: "why", Decision: "approved"}
+		Args: "a", Result: "r", Summary: "{}", Text: "x", Reason: "why", Decision: "approved", Meta: `{"traceparent":"00-ab"}`}
 	s, err := SealEvent(context.Background(), e, k1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.System != "" || s.Message != nil || s.Args != "" || s.Reason != "" || s.Sealed == "" {
+	if s.System != "" || s.Message != nil || s.Args != "" || s.Reason != "" || s.Meta != "" || s.Sealed == "" {
 		t.Fatalf("content left in the clear: %+v", s)
 	}
 	if s.Tool != "pay" || s.Key != "k" || s.By != "ops" || s.Decision != "approved" {

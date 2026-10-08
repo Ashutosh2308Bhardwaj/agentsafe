@@ -70,6 +70,15 @@ func KeyFrom(ctx context.Context) string {
 
 type keyCtx struct{}
 
+// CallMetaFrom is the request metadata a call through a Gateway carries (Request.Meta): for an MCP proxy, the
+// client's _meta minus what belongs to its own connection. nil if there is none. It's the same on a retry.
+func CallMetaFrom(ctx context.Context) json.RawMessage {
+	m, _ := ctx.Value(metaCtx{}).(json.RawMessage)
+	return m
+}
+
+type metaCtx struct{}
+
 // FuncOption configures a Func.
 type FuncOption struct {
 	name  string

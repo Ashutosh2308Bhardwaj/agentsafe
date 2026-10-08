@@ -6,12 +6,26 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Changed (`mcp`)
+
+- **The client's `_meta` is forwarded** to the upstream (it was dropped), merged under the proxy's idempotency key in
+  `meta` mode (it was replaced). Keys under a reserved MCP prefix (the client's protocol version, client info and
+  capabilities: forwarding them would present the proxy as the agent) and `progressToken` stay on the client's hop;
+  agentsafe's namespace is written only by the proxy. Recorded with the call (format v6), so a retry sends the same.
+
 ### Changed (breaking, `mcp`)
 
 - **The proxy fails closed.** A tool without a policy is no longer passed through: it isn't exposed to the agent
   at all (not listed, not callable). `{"pass": true}` forwards a tool unprotected on purpose. `Proxy.Hidden` and
   `Proxy.Unprotected` list both kinds, and `agentsafe-mcp` warns about them at startup. A server that adds a tool
   (`delete_account`) doesn't get it forwarded until someone writes its policy.
+
+### Added
+
+- **Request metadata through a Gateway** (log format v6): `Gateway.Handle(ctx, Request{..., Meta})`; the tool reads it
+  with `CallMetaFrom(ctx)`. It's recorded on `call_received` (sealed like the arguments), so a retry after a crash
+  carries the same metadata, and it isn't part of the operation: the same call with a new trace id is a replay.
+  `Gateway.Call` is unchanged. A v0.4 library refuses v6 logs.
 
 ### Documentation
 

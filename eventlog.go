@@ -58,6 +58,10 @@ type Event struct {
 
 	// call_received (v5): who sent it, as the client reports itself (unverified: for audit display only)
 	Client string `json:"client,omitempty"`
+	// call_received (v6): request metadata the gateway's tool receives with the call (CallMetaFrom), e.g. the
+	// client's MCP _meta minus what belongs to its own connection. Recorded so a retry after a crash sends the
+	// same request. Content: sealed with the rest.
+	Meta string `json:"meta,omitempty"` // JSON text, like args
 
 	// tool_started / tool_result
 	CallID string `json:"call_id,omitempty"`

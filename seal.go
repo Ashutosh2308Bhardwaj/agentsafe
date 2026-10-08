@@ -52,6 +52,7 @@ type sealedContent struct {
 	Args    string   `json:"args,omitempty"`
 	Result  string   `json:"result,omitempty"`
 	Summary string   `json:"summary,omitempty"`
+	Meta    string   `json:"meta,omitempty"`
 	Text    string   `json:"text,omitempty"`
 	Reason  string   `json:"reason,omitempty"`
 }
@@ -67,7 +68,7 @@ func SealEvent(ctx context.Context, e Event, c Codec) (Event, error) {
 		return e, errors.New("agentsafe: event is already sealed")
 	}
 	sc := sealedContent{System: e.System, Task: e.Task, Message: e.Message, Args: e.Args, Result: e.Result,
-		Summary: e.Summary, Text: e.Text, Reason: e.Reason}
+		Summary: e.Summary, Text: e.Text, Reason: e.Reason, Meta: e.Meta}
 	if sc == (sealedContent{}) {
 		return e, nil
 	}
@@ -80,6 +81,7 @@ func SealEvent(ctx context.Context, e Event, c Codec) (Event, error) {
 		return e, fmt.Errorf("sealing event %d: %w", e.Seq, err)
 	}
 	e.System, e.Task, e.Message, e.Args, e.Result, e.Summary, e.Text, e.Reason = "", "", nil, "", "", "", "", ""
+	e.Meta = ""
 	e.Sealed = base64.StdEncoding.EncodeToString(ct)
 	return e, nil
 }
@@ -105,7 +107,7 @@ func OpenEvent(ctx context.Context, e Event, c Codec) (Event, error) {
 		return e, fmt.Errorf("%w: event %d: %w", ErrCannotOpen, e.Seq, err)
 	}
 	e.System, e.Task, e.Message, e.Args, e.Result = sc.System, sc.Task, sc.Message, sc.Args, sc.Result
-	e.Summary, e.Text, e.Reason, e.Sealed = sc.Summary, sc.Text, sc.Reason, ""
+	e.Summary, e.Text, e.Reason, e.Meta, e.Sealed = sc.Summary, sc.Text, sc.Reason, sc.Meta, ""
 	return e, nil
 }
 

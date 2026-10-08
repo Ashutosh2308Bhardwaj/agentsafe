@@ -109,14 +109,33 @@ func (g *Gateway) settle(ctx context.Context, st *State) error {
 	return g.r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: res})
 }
 
-// Call handles one call. client is who sent it, as the client reports itself: recorded for audit, not trusted.
-// An error means the call's outcome is unknown, or the log couldn't be written: nothing more can be said
-// about it, and the next Call (or a restart) settles it first.
+// Request is one call from outside.
+type Request struct {
+	Client string          // who sent it, as the client reports itself: recorded for audit, not trusted
+	Tool   string          // the tool to call
+	Args   json.RawMessage // its arguments
+	// Meta is metadata the tool receives with the call (CallMetaFrom): a JSON object, or empty. It's recorded
+	// (sealed, like the arguments) so a retry after a crash sends the same request, and it's not part of the
+	// operation: two calls that differ only in Meta are the same operation.
+	Meta json.RawMessage
+}
+
+// Call handles one call without metadata: Handle(ctx, Request{Client: client, Tool: tool, Args: args}).
 func (g *Gateway) Call(ctx context.Context, client, tool string, args json.RawMessage) (GatewayResult, error) {
+	return g.Handle(ctx, Request{Client: client, Tool: tool, Args: args})
+}
+
+// Handle handles one call. An error means the call's outcome is unknown, or the log couldn't be written:
+// nothing more can be said about it, and the next call (or a restart) settles it first.
+func (g *Gateway) Handle(ctx context.Context, req Request) (GatewayResult, error) {
+	if len(req.Meta) > 0 && !isJSONObject(req.Meta) {
+		return GatewayResult{}, fmt.Errorf("%w: request metadata must be a JSON object", ErrConfig)
+	}
 	var out GatewayResult
 	err := g.locked(ctx, func(st *State) error {
+		tool, args := req.Tool, req.Args
 		c := ToolCall{ID: fmt.Sprintf("call-%d", st.Events+1), Type: "function", Function: FunctionCall{Name: tool, Arguments: string(args)}}
-		if err := g.r.emit(ctx, st, Event{Type: EvCallReceived, CallID: c.ID, Tool: tool, Args: string(args), Client: client}); err != nil {
+		if err := g.r.emit(ctx, st, Event{Type: EvCallReceived, CallID: c.ID, Tool: tool, Args: string(args), Client: req.Client, Meta: string(req.Meta)}); err != nil {
 			return err
 		}
 		g.r.hook("call_received")
@@ -186,6 +205,11 @@ func (g *Gateway) Pending(ctx context.Context) ([]Waiting, error) {
 		return nil
 	})
 	return out, err
+}
+
+func isJSONObject(b json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	return json.Unmarshal(b, &m) == nil && m != nil
 }
 
 func callNumber(id string) int {

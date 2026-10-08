@@ -173,10 +173,10 @@ func (t *keyedTool) Validate(_ context.Context, args json.RawMessage) error {
 
 // CallWithKey forwards the call with its key, where the policy says the upstream reads it.
 func (t *keyedTool) CallWithKey(ctx context.Context, key string, args json.RawMessage) (any, error) {
-	params := &sdk.CallToolParams{Name: t.spec.Name, Arguments: args}
+	params := &sdk.CallToolParams{Name: t.spec.Name, Arguments: args, Meta: upstreamMeta(ctx)}
 	switch t.policy.Key {
 	case KeyMeta:
-		params.Meta = sdk.Meta{MetaKeyIdempotency: key}
+		params.Meta[MetaKeyIdempotency] = key // merged into the client's metadata; the proxy's key wins
 	case KeyArgument:
 		var obj map[string]any
 		if err := json.Unmarshal(args, &obj); err != nil {

@@ -21,6 +21,7 @@ type fakeUpstream struct {
 	charges int               // effects of charge: what the customer was actually billed for
 	keys    []string          // the idempotency key each charge request carried, and how ("arg:"/"meta:")
 	done    map[string]string // what it answered per key: it deduplicates, like a payment API
+	metas   []sdk.Meta        // the _meta each charge request carried
 }
 
 func (f *fakeUpstream) server() *sdk.Server {
@@ -214,7 +215,7 @@ func (f *fakeUpstream) charge(_ context.Context, req *sdk.CallToolRequest) (*sdk
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.keys = append(f.keys, how+key)
+	f.keys, f.metas = append(f.keys, how+key), append(f.metas, req.Params.Meta)
 	if prev, ok := f.done[key]; ok && key != "" {
 		return text(false, "%s", prev), nil
 	}

@@ -41,6 +41,8 @@ var golden = []struct {
 		events: 26, step: 8, effects: 5, msgs: 16, status: StatusFinished, stop: "stop", approvedOps: 1},
 	// v5: a proxy run (calls from outside, e.g. an MCP client): a read, a keyed write, an unknown tool refused.
 	{file: "testdata/golden_v5_proxy.jsonl", version: 5, events: 9, effects: 1, status: StatusOpen},
+	// v6: a proxy run whose calls carry metadata (call_received.meta): two trace ids, one operation, a replay.
+	{file: "testdata/golden_v6_proxy_meta.jsonl", version: 6, events: 7, effects: 1, status: StatusOpen},
 }
 
 func TestGoldenLogsStillRebuild(t *testing.T) {

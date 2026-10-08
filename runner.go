@@ -241,6 +241,9 @@ func (r *Runner) run(ctx context.Context, st *State, tool Tool, c ToolCall, key,
 		return err
 	}
 	r.hook("before_tool_executed")
+	if m := st.CallMeta[c.ID]; m != "" {
+		ctx = context.WithValue(ctx, metaCtx{}, json.RawMessage(m)) // the same metadata on a retry: it's in the log
+	}
 	result, err := r.execute(ctx, tool, c, key)
 	r.hook("after_tool_executed") // THE point week 2 had to close: effect done, result not yet logged
 	if err != nil && blind && errors.Is(err, ErrInDoubt) {

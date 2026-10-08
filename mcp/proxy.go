@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -122,13 +123,55 @@ func (p *Proxy) handle(ctx context.Context, req *sdk.CallToolRequest) (*sdk.Call
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	res, err := p.gateway.Call(ctx, clientName(req), req.Params.Name, args)
+	meta, err := forwardable(req.Params.Meta)
+	if err != nil {
+		return nil, err
+	}
+	res, err := p.gateway.Handle(ctx, agentsafe.Request{Client: clientName(req), Tool: req.Params.Name, Args: args, Meta: meta})
 	if err != nil {
 		// The outcome is unknown, or the log couldn't be written. Say so to the model, as a tool error it can
 		// reason about, rather than as a protocol error some clients turn into a crash.
 		return errorResult(fmt.Sprintf("agentsafe: %v. The call may or may not have taken effect: don't repeat it before checking", err)), nil
 	}
 	return toResult(res), nil
+}
+
+// forwardable is the part of the client's _meta that travels to the upstream: everything except what belongs to
+// the client's own connection to the proxy (keys under a reserved MCP prefix, such as the protocol version and
+// client info; progressToken) and agentsafe's own namespace, which only the proxy writes (a client can't set the
+// idempotency key). nil if nothing is left.
+func forwardable(meta sdk.Meta) (json.RawMessage, error) {
+	out := map[string]any{}
+	for k, v := range meta {
+		if k == "progressToken" || strings.HasPrefix(k, MetaPrefix) || reservedMeta(k) {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(out)
+}
+
+// reservedMeta: a _meta key whose prefix's second label is "modelcontextprotocol" or "mcp" is reserved for MCP
+// itself (io.modelcontextprotocol/, dev.mcp/), so it describes this hop, not the request.
+func reservedMeta(key string) bool {
+	prefix, _, ok := strings.Cut(key, "/")
+	if !ok {
+		return false
+	}
+	labels := strings.Split(prefix, ".")
+	return len(labels) >= 2 && (labels[1] == "modelcontextprotocol" || labels[1] == "mcp")
+}
+
+// upstreamMeta is the metadata to send upstream: what the Gateway recorded for this call (the same on a retry).
+func upstreamMeta(ctx context.Context) sdk.Meta {
+	m := sdk.Meta{}
+	if raw := agentsafe.CallMetaFrom(ctx); len(raw) > 0 {
+		_ = json.Unmarshal(raw, &m) // recorded by Handle, which only accepts a JSON object
+	}
+	return m
 }
 
 // toResult turns what the Gateway logged back into an MCP result. A forwarded call's result is the upstream's
@@ -193,5 +236,5 @@ func (t *upstreamTool) Spec() agentsafe.ToolSpec { return t.spec }
 // Call forwards the call. Its result is the upstream's whole CallToolResult, logged as JSON. A protocol or
 // transport error is an error: the Gateway records that the call may or may not have taken effect.
 func (t *upstreamTool) Call(ctx context.Context, args json.RawMessage) (any, error) {
-	return t.session.CallTool(ctx, &sdk.CallToolParams{Name: t.spec.Name, Arguments: args})
+	return t.session.CallTool(ctx, &sdk.CallToolParams{Name: t.spec.Name, Arguments: args, Meta: upstreamMeta(ctx)})
 }

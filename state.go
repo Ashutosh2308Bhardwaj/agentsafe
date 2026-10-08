@@ -1,6 +1,9 @@
 package agentsafe
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Status is where a run is. Every status is derived from the log; none is stored.
 type Status string
@@ -42,6 +45,9 @@ type State struct {
 	Approvals map[string]string
 	ByKey     map[string]string
 	Waiting   *Waiting // set while awaiting_approval
+	// CallMeta is a proxy run's pending call's request metadata (call_received.meta), by call id: a retry after a
+	// crash gives the tool the same metadata as the first attempt.
+	CallMeta map[string]string
 	// Requests are a proxy run's approvals still waiting, by operation key. A proxy run doesn't pause for an
 	// approval: the call is answered "pending" and the run stays open; the decision is addressed by key.
 	Requests  map[string]Waiting
@@ -67,7 +73,7 @@ type Outcome struct {
 // NewState is the state of a run with no events.
 func NewState() State {
 	return State{Status: StatusNew, Started: map[string]bool{}, Effects: map[string]Outcome{},
-		Approvals: map[string]string{}, ByKey: map[string]string{}, Requests: map[string]Waiting{}}
+		Approvals: map[string]string{}, ByKey: map[string]string{}, Requests: map[string]Waiting{}, CallMeta: map[string]string{}}
 }
 
 // Rebuild folds a log into a State, checking every transition. A log that breaks the rules is an error,
@@ -387,7 +393,13 @@ func (s *State) callReceived(e Event) error {
 	if e.CallID == "" || e.Tool == "" {
 		return fmt.Errorf("call_received needs a call_id and a tool")
 	}
+	if e.Meta != "" && !json.Valid([]byte(e.Meta)) {
+		return fmt.Errorf("call_received with metadata that isn't JSON")
+	}
 	s.Pending = []ToolCall{{ID: e.CallID, Type: "function", Function: FunctionCall{Name: e.Tool, Arguments: e.Args}}}
+	if e.Meta != "" {
+		s.CallMeta[e.CallID] = e.Meta
+	}
 	s.Status = StatusExecuting
 	return nil
 }
@@ -458,6 +470,7 @@ func (s *State) isPending(id string) bool {
 }
 
 func (s *State) removePending(id string) {
+	delete(s.CallMeta, id)
 	for i, c := range s.Pending {
 		if c.ID == id {
 			s.Pending = append(s.Pending[:i], s.Pending[i+1:]...)
