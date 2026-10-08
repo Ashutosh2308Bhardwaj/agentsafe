@@ -6,6 +6,10 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+## [mcp/v0.3.0] - 2026-10-08
+
+`agentsafe/mcp` only: the core stays at v0.5.0.
+
 ### Added
 
 - `agentsafe-mcp verify`: `mcptest.SameKey` from the command line, against a sandbox of the server. `--count` is a
@@ -201,6 +205,7 @@ The first release: correctness primitives for LLM agents that act on money, hard
 
 [Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...v0.5.0
+[mcp/v0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.2.0...mcp/v0.3.0
 [0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.1.0...v0.2.0
