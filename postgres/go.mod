@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/postgres
 go 1.25.0
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.3.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.4.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 
