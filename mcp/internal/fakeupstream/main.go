@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,7 +22,9 @@ type books struct {
 }
 
 func main() {
+	var mu sync.Mutex // the books are a file: one read-modify-write at a time
 	path := flag.String("state", "books.json", "file holding the books")
+	printCharges := flag.Bool("print-charges", false, "print how many charges the books hold, and exit (for --count)")
 	flag.Parse()
 	load := func() books {
 		b := books{Seats: 10, Done: map[string]string{}}
@@ -37,6 +40,10 @@ func main() {
 		}
 		return os.WriteFile(*path, raw, 0o600)
 	}
+	if *printCharges {
+		fmt.Println(load().Charges)
+		return
+	}
 	reply := func(s string) *sdk.CallToolResult {
 		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: s}}}
 	}
@@ -48,6 +55,8 @@ func main() {
 			if err := json.Unmarshal(req.Params.Arguments, &in); err != nil {
 				return nil, err
 			}
+			mu.Lock()
+			defer mu.Unlock()
 			b := load()
 			b.Seats += in.Add
 			return reply(fmt.Sprintf("now %d seats", b.Seats)), save(b)
@@ -66,6 +75,8 @@ func main() {
 			if k, ok := req.Params.Meta[mcp.MetaKeyIdempotency].(string); ok {
 				in.Key = k
 			}
+			mu.Lock() // the check and the charge are one step: this server honours its key, even under concurrency
+			defer mu.Unlock()
 			b := load()
 			if prev, ok := b.Done[in.Key]; ok && in.Key != "" {
 				return reply(prev), nil
@@ -76,6 +87,16 @@ func main() {
 				b.Done[in.Key] = answer
 			}
 			return reply(answer), save(b)
+		})
+	s.AddTool(&sdk.Tool{Name: "charge_ignores_key", Description: "Bill the customer; takes a key and ignores it",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"ticket_id": map[string]any{"type": "string"},
+			"amount": map[string]any{"type": "string"}, "idempotency_key": map[string]any{"type": "string"}}}},
+		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			mu.Lock() // locked only so the count is exact: it ignores the key either way
+			defer mu.Unlock()
+			b := load()
+			b.Charges++
+			return reply(fmt.Sprintf("charged (charge %d)", b.Charges)), save(b)
 		})
 	if err := s.Run(context.Background(), &sdk.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "fakeupstream:", err)

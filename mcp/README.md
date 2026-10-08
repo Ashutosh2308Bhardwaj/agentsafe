@@ -63,9 +63,18 @@ With a policy for a tool:
   `TestKilledAfterTheUpstreamChargedThenRestarted` kills the proxy right after the server charged: one
   charge in every mode, two without a policy.
 - **`key: meta` or `argument` is your claim that the server deduplicates on the key**: agentsafe-mcp can't know. Check
-  it against a sandbox of the server with `mcptest.SameKey`, which calls the tool the way the proxy does: one call
-  with a new key (one effect), then 20 at once with one key (still one effect, one answer). It catches a server that
-  ignores the key and one that checks and charges without a lock.
+  it against a **sandbox** of the server, calling the tool the way the proxy does: one call with a new key (one
+  effect), then 20 at once with one key (still one effect, one answer).
+
+  ```bash
+  agentsafe-mcp verify --policy policy.json --tool charge --args '{"ticket_id":"VERIFY-1","amount":"0.01"}' \
+      --count 'sqlite3 sandbox.db "select count(*) from charges"' --sandbox -- npx -y @acme/billing-mcp-sandbox
+  ```
+
+  `--count` is any shell command printing how many effects exist (a `count(*)`, `curl … | jq length`). It makes real
+  calls, so it won't run without `--sandbox`. From Go: `mcptest.SameKey`. It catches a server that ignores the key,
+  and one that checks and then acts without a lock **when there's a real gap between the two** (a database read, then
+  a payment API call): a race only microseconds wide can pass. A pass is strong evidence, not proof.
 - A call missing an identity field is refused before it's forwarded. Policies are checked against the
   server's real tools at startup: a misspelt tool or argument fails loudly instead of leaving a tool bare.
 
@@ -89,6 +98,5 @@ With `approval: always`:
 
 ## Not yet
 
-`resolve` (a person recording what became of an unknown outcome), an `agentsafe-mcp verify` command (today the check
-is `mcptest.SameKey`, from Go), choosing SQLite / Postgres / sealing from the binary (the library takes any
+`resolve` (a person recording what became of an unknown outcome), choosing SQLite / Postgres / sealing from the binary (the library takes any
 `agentsafe.Log`), several upstreams, and Streamable HTTP. See the design.

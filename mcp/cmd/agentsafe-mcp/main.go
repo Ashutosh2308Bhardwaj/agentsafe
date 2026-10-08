@@ -13,6 +13,12 @@
 //	agentsafe-mcp approve --log calls.jsonl --policy policy.json KEY
 //	agentsafe-mcp reject  --log calls.jsonl --policy policy.json --reason "duplicate ticket" KEY
 //
+// A policy with key "meta" or "argument" claims the server deduplicates on the key. Check the claim against a
+// sandbox of the server (it makes real calls, so it refuses to run without --sandbox):
+//
+//	agentsafe-mcp verify --policy policy.json --tool charge --args '{"ticket_id":"VERIFY-1","amount":"0.01"}' \
+//	    --count 'sqlite3 sandbox.db "select count(*) from charges"' --sandbox -- npx -y @acme/billing-mcp
+//
 // AGENTSAFE_KILL_AT=<point> kills the proxy at a named point (e.g. after_tool_executed): for crash tests.
 package main
 
@@ -37,9 +43,12 @@ const version = "0.2.0"
 
 func main() {
 	var err error
-	if len(os.Args) > 1 && (os.Args[1] == "approve" || os.Args[1] == "reject" || os.Args[1] == "pending") {
+	switch {
+	case len(os.Args) > 1 && (os.Args[1] == "approve" || os.Args[1] == "reject" || os.Args[1] == "pending"):
 		err = decide(os.Args[1], os.Args[2:])
-	} else {
+	case len(os.Args) > 1 && os.Args[1] == "verify":
+		err = verify(os.Args[2:])
+	default:
 		err = serve(os.Args[1:])
 	}
 	if err != nil {
@@ -102,12 +111,9 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cmd := exec.CommandContext(ctx, fs.Arg(0), fs.Args()[1:]...) //nolint:gosec // running the configured upstream is the point
-	cmd.Stderr = os.Stderr
-	upstream, err := sdk.NewClient(&sdk.Implementation{Name: "agentsafe-mcp", Version: version}, nil).
-		Connect(ctx, &sdk.CommandTransport{Command: cmd}, nil)
+	upstream, err := startUpstream(ctx, fs.Args())
 	if err != nil {
-		return fmt.Errorf("starting the upstream %q: %w", fs.Arg(0), err)
+		return err
 	}
 	defer func() { _ = upstream.Close() }()
 
@@ -213,4 +219,16 @@ func warn(p *mcp.Proxy) {
 		fmt.Fprintf(os.Stderr, "agentsafe-mcp: WARNING: %d tool(s) are passed through and not marked read-only: %s\n"+
 			"  They will be forwarded without idempotency or approval (each call is still logged).\n", len(u), strings.Join(u, ", "))
 	}
+}
+
+// startUpstream starts the upstream MCP server (argv) as a child process and connects to it over stdio.
+func startUpstream(ctx context.Context, argv []string) (*sdk.ClientSession, error) {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // running the configured upstream is the point
+	cmd.Stderr = os.Stderr
+	upstream, err := sdk.NewClient(&sdk.Implementation{Name: "agentsafe-mcp", Version: version}, nil).
+		Connect(ctx, &sdk.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("starting the upstream %q: %w", argv[0], err)
+	}
+	return upstream, nil
 }

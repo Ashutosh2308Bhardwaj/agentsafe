@@ -205,3 +205,51 @@ func TestApprovingFromTheCommandLine(t *testing.T) {
 		})
 	}
 }
+
+// verify against a sandbox: a server that honours its key passes; one that takes the key and ignores it fails;
+// without --sandbox nothing is called; a policy that sends no key can't be checked.
+func TestVerifyingThatAServerHonoursItsKey(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	for _, c := range []struct {
+		name, tool, key string
+		sandbox         bool
+		ok              bool
+		want            string
+		charges         string // what the books hold after
+	}{
+		{"a server that honours its key", "charge", "argument", true, true, "PASS: charge deduplicates on its key", `"charges":2`},
+		{"one that takes the key and ignores it", "charge_ignores_key", "argument", true, false, "FAIL", `"charges":`},
+		{"not confirmed as a sandbox", "charge", "argument", false, false, "--sandbox", ``},
+		{"a policy that sends no key", "charge", "none", true, false, "only a policy that sends a key", ``},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := t.TempDir()
+			books, policy := filepath.Join(run, "books.json"), filepath.Join(run, "policy.json")
+			p := fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"],"key":%q}}}`, c.tool, c.key)
+			if c.key == "argument" {
+				p = fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"],"key":"argument","key_argument":"idempotency_key"}}}`, c.tool)
+			}
+			if err := os.WriteFile(policy, []byte(p), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"verify", "--policy", policy, "--tool", c.tool, "--args", `{"ticket_id":"VERIFY-1","amount":"0.01"}`,
+				"--count", upstreamBin + " --state " + books + " --print-charges"}
+			if c.sandbox {
+				args = append(args, "--sandbox")
+			}
+			out, err := exec.Command(proxyBin, append(args, "--", upstreamBin, "--state", books)...).CombinedOutput()
+			if (err == nil) != c.ok || !strings.Contains(string(out), c.want) {
+				t.Fatalf("ok=%v (want %v), want %q in:\n%s", err == nil, c.ok, c.want, out)
+			}
+			raw, _ := os.ReadFile(books)
+			if c.charges == "" && len(raw) > 0 && !strings.Contains(string(raw), `"charges":0`) {
+				t.Fatalf("nothing may be called: %s", raw)
+			}
+			if c.charges != "" && !strings.Contains(string(raw), c.charges) {
+				t.Fatalf("books: %s, want %s", raw, c.charges)
+			}
+		})
+	}
+}

@@ -6,6 +6,13 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Added
+
+- `agentsafe-mcp verify`: `mcptest.SameKey` from the command line, against a sandbox of the server. `--count` is a
+  shell command printing how many effects exist; it refuses to run without `--sandbox`, and refuses a policy that
+  sends no key. Catches a server that ignores the key and one that checks then acts without a lock, given a real
+  gap between the two (a race only microseconds wide can pass).
+
 ## [0.5.0] - 2026-10-08
 
 Hardening of the MCP proxy after an outside review: it fails closed, forwards the client's metadata (and replays it
