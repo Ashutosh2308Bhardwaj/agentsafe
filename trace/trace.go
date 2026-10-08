@@ -105,14 +105,15 @@ type traceBuilder struct {
 	traceID, rootID string
 	root            Span
 	spans           []Span
-	open            map[string]int // call id (or "approval:"+call id) -> index in spans
+	open            map[string]int    // call id (or "approval:"+call id) -> index in spans
+	clients         map[string]string // proxy runs: call id -> the client that sent it (self-reported)
 	step            int
 	prev            time.Time // the event before the current one: a chat span starts there
 }
 
 func newTraceBuilder(events []agentsafe.Event, agent string, st agentsafe.State) *traceBuilder {
 	first := events[0]
-	b := &traceBuilder{first: first, open: map[string]int{}, prev: first.Time}
+	b := &traceBuilder{first: first, open: map[string]int{}, clients: map[string]string{}, prev: first.Time}
 	b.traceID = id(32, "trace", first.Time.Format(time.RFC3339Nano), first.Task)
 	b.rootID = id(16, b.traceID, "root")
 	b.root = Span{TraceID: b.traceID, SpanID: b.rootID, Name: "invoke_agent " + agent, Kind: kindInternal,
@@ -128,9 +129,14 @@ func newTraceBuilder(events []agentsafe.Event, agent string, st agentsafe.State)
 			{"agentsafe.run.budget", st.Budget},
 			{"agentsafe.log.events", len(events)},
 		}}
+	if st.Kind == agentsafe.KindProxy { // only for proxy runs: agent-run traces stay byte-identical
+		b.root.Attrs = append(b.root.Attrs, Attr{"agentsafe.run.kind", agentsafe.KindProxy})
+	}
 	switch st.Status {
 	case agentsafe.StatusFinished:
 		b.root.Status = statusOK
+	case agentsafe.StatusOpen:
+		b.root.Open, b.root.StatusMsg = true, "a proxy run stays open for calls"
 	case agentsafe.StatusPaused, agentsafe.StatusAwaitingApproval:
 		b.root.Open, b.root.StatusMsg = true, "run is "+string(st.Status)
 	default:
@@ -150,7 +156,8 @@ func (b *traceBuilder) add(e agentsafe.Event) error {
 	case agentsafe.EvRunStarted: // the root span, built in newTraceBuilder
 	case agentsafe.EvModelDecided:
 		b.chat(e)
-	case agentsafe.EvCallReceived: // a proxy run: the tool span starts at tool_started (proxy traces: MCP proxy phase 4)
+	case agentsafe.EvCallReceived: // a proxy run: the tool span starts at tool_started, with who sent the call
+		b.clients[e.CallID] = e.Client
 	case agentsafe.EvToolStarted:
 		b.toolStarted(e)
 	case agentsafe.EvToolResult:
@@ -211,6 +218,9 @@ func (b *traceBuilder) toolStarted(e agentsafe.Event) {
 		Attr{"gen_ai.operation.name", "execute_tool"}, Attr{"gen_ai.tool.name", e.Tool},
 		Attr{"gen_ai.tool.call.id", e.CallID}, Attr{"gen_ai.tool.type", "function"},
 		Attr{"agentsafe.idempotency.key", e.Key}, Attr{"agentsafe.attempts", 1})
+	if c := b.clients[e.CallID]; c != "" {
+		setAttr(&b.spans[b.open[e.CallID]], "agentsafe.client", c)
+	}
 }
 
 func (b *traceBuilder) toolResult(e agentsafe.Event) error {
@@ -377,8 +387,13 @@ func (t *Trace) OTLPJSON(service string) ([]byte, error) {
 func (t *Trace) Tree() string {
 	var b strings.Builder
 	r := t.Spans[0]
-	fmt.Fprintf(&b, "%s  %s  [%s %s, steps %v/%v, %v events]\n", r.Name, dur(r), get(r, "agentsafe.run.status"),
-		get(r, "agentsafe.run.stop"), get(r, "agentsafe.run.steps"), get(r, "agentsafe.run.budget"), get(r, "agentsafe.log.events"))
+	proxy := get(r, "agentsafe.run.kind") == agentsafe.KindProxy
+	if proxy { // calls from outside: no model steps, no budget; tools at the top level
+		fmt.Fprintf(&b, "%s  %s  [proxy run, %v, %v events]\n", r.Name, dur(r), get(r, "agentsafe.run.status"), get(r, "agentsafe.log.events"))
+	} else {
+		fmt.Fprintf(&b, "%s  %s  [%s %s, steps %v/%v, %v events]\n", r.Name, dur(r), get(r, "agentsafe.run.status"),
+			get(r, "agentsafe.run.stop"), get(r, "agentsafe.run.steps"), get(r, "agentsafe.run.budget"), get(r, "agentsafe.log.events"))
+	}
 	for _, s := range t.Spans[1:] {
 		indent, line := "├─ ", ""
 		switch {
@@ -390,8 +405,13 @@ func (t *Trace) Tree() string {
 			line = fmt.Sprintf("step %v  %s  %s%s  → %v", get(s, "agentsafe.step"), s.Name, dur(s), tokens,
 				list(get(s, "agentsafe.proposed_tools"), get(s, "gen_ai.response.finish_reasons")))
 		case strings.HasPrefix(s.Name, "execute_tool "):
-			indent = "│   └─ "
+			if !proxy {
+				indent = "│   └─ "
+			}
 			line = fmt.Sprintf("%s  %s  %v", s.Name, dur(s), get(s, "agentsafe.outcome"))
+			if c := get(s, "agentsafe.client"); c != nil {
+				line += fmt.Sprintf("  (from %v)", c)
+			}
 			if n := attrInt(s, "agentsafe.attempts"); n > 1 {
 				line += fmt.Sprintf("  ⚠ %d attempts (crash mid-call)", n)
 			}
