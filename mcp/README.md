@@ -27,7 +27,16 @@ which need a human's approval, and who may give it:
 } }
 ```
 
-## What it does
+## What it does, and what it doesn't
+
+**A tool proxy, for one upstream MCP server, over stdio.** Only tools are proxied: resources and prompts are not.
+Streamable HTTP and several upstreams are planned ([the design](../docs/MCP_PROXY.md)).
+
+**It fails closed: a tool without a policy isn't exposed** (not listed, not callable). `{"pass": true}` forwards a
+tool unprotected on purpose. At startup, stderr lists every hidden tool and every passed-through tool that the
+server doesn't mark read-only. The server's tools are read at startup: one it adds later appears after a restart,
+and only with a policy.
+
 
 - The agent sees the upstream server's tools exactly as the server describes them.
 - **Every call is logged before it's forwarded** (write-ahead) and **logged with what came back**: one log,
@@ -72,5 +81,6 @@ With `approval: always`:
 
 ## Not yet
 
-`resolve` (a person recording what became of an unknown outcome), `strict` (refuse tools without a policy), and
-choosing SQLite / Postgres / sealing from the binary (the library takes any `agentsafe.Log`). See the design.
+`resolve` (a person recording what became of an unknown outcome), forwarding the client's `_meta`, a verifier that
+a server really deduplicates on its key, choosing SQLite / Postgres / sealing from the binary (the library takes any
+`agentsafe.Log`), several upstreams, and Streamable HTTP. See the design.

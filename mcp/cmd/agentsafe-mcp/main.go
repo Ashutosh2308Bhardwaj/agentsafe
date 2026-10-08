@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"os/user"
+	"strings"
 	"syscall"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
@@ -127,6 +128,7 @@ func serve(args []string) error {
 		return err
 	}
 	defer func() { _ = proxy.Close() }()
+	warn(proxy)
 
 	err = proxy.Server(&sdk.Implementation{Name: "agentsafe-mcp", Version: version}).Run(ctx, &sdk.StdioTransport{})
 	if errors.Is(err, context.Canceled) {
@@ -199,4 +201,16 @@ func osIdentity() (string, error) {
 		return "", fmt.Errorf("who is deciding: %w", err)
 	}
 	return "user:" + u.Username, nil
+}
+
+// warn says, at startup, what the agent can't see and what it can call unprotected: nothing is silently either.
+func warn(p *mcp.Proxy) {
+	if h := p.Hidden(); len(h) > 0 {
+		fmt.Fprintf(os.Stderr, "agentsafe-mcp: WARNING: %d upstream tool(s) have no policy and are NOT exposed to the agent: %s\n"+
+			"  Give each a policy (or \"pass\": true) to expose it.\n", len(h), strings.Join(h, ", "))
+	}
+	if u := p.Unprotected(); len(u) > 0 {
+		fmt.Fprintf(os.Stderr, "agentsafe-mcp: WARNING: %d tool(s) are passed through and not marked read-only: %s\n"+
+			"  They will be forwarded without idempotency or approval (each call is still logged).\n", len(u), strings.Join(u, ", "))
+	}
 }

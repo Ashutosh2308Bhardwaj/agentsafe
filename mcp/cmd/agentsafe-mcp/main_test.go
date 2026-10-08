@@ -36,7 +36,11 @@ func TestAgentsafeMCPAsAProcess(t *testing.T) {
 	log, state := filepath.Join(dir, "calls.jsonl"), filepath.Join(dir, "books.json")
 
 	ctx := context.Background()
-	cmd := exec.Command(proxyBin, "--log", log, "--started-by", "support-agent", "--", upstreamBin, "--state", state)
+	policy := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policy, []byte(`{"tools":{"add_seats":{"pass":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(proxyBin, "--log", log, "--policy", policy, "--started-by", "support-agent", "--", upstreamBin, "--state", state)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	agent, err := sdk.NewClient(&sdk.Implementation{Name: "test-agent", Version: "1"}, nil).
@@ -63,8 +67,14 @@ func TestAgentsafeMCPAsAProcess(t *testing.T) {
 	if err != nil || st.Kind != agentsafe.KindProxy || st.Events != 4 || st.StartedBy != "support-agent" {
 		t.Fatalf("run_started, call_received, tool_started, tool_result: err=%v %+v", err, st)
 	}
-	if !strings.Contains(stderr.String(), "add_seats") {
-		t.Fatalf("progress goes to stderr (stdout is the protocol): %q", stderr.String())
+	for _, want := range []string{
+		"add_seats",         // progress goes to stderr: stdout is the protocol
+		"WARNING", "charge", // charge has no policy: not exposed, and the operator is told
+		"forwarded without idempotency", // add_seats is passed through and not read-only
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr must mention %q:\n%s", want, stderr.String())
+		}
 	}
 }
 
@@ -83,7 +93,7 @@ func TestKilledAfterTheUpstreamChargedThenRestarted(t *testing.T) {
 		{"key as an argument", `{"tools":{"charge":{"identity":["ticket_id"],"key":"argument","key_argument":"idempotency_key"}}}`, 1, "charged 10.00 (charge 1)"},
 		{"key in _meta", `{"tools":{"charge":{"identity":["ticket_id"],"key":"meta"}}}`, 1, "charged 10.00 (charge 1)"},
 		{"no key the upstream can read", `{"tools":{"charge":{"identity":["ticket_id"],"key":"none"}}}`, 1, "outcome unknown"},
-		{"control: no policy", ``, 2, "charged 10.00 (charge 2)"},
+		{"control: passed through, unprotected", `{"tools":{"charge":{"pass":true}}}`, 2, "charged 10.00 (charge 2)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			run := filepath.Join(t.TempDir(), "run")

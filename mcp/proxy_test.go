@@ -84,7 +84,7 @@ func newPolicyRig(t *testing.T, log string, up *fakeUpstream, policies map[strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: log}, policies, append([]agentsafe.Option{agentsafe.WithStartedBy("support-agent")}, opts...)...)
+	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: log}, passRest(policies), append([]agentsafe.Option{agentsafe.WithStartedBy("support-agent")}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,4 +225,17 @@ func (f *fakeUpstream) charge(_ context.Context, req *sdk.CallToolRequest) (*sdk
 	}
 	f.done[key] = answer
 	return text(false, "%s", answer), nil
+}
+
+// passRest gives every fake-upstream tool without a policy "pass": the proxy fails closed, and these tests are
+// about other things.
+func passRest(policies map[string]mcp.Policy) map[string]mcp.Policy {
+	out := map[string]mcp.Policy{}
+	for _, name := range []string{"get_seats", "add_seats", "charge", "cancel_plan"} {
+		out[name] = mcp.Policy{Pass: true}
+	}
+	for name, p := range policies {
+		out[name] = p
+	}
+	return out
 }

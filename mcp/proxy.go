@@ -3,9 +3,11 @@
 // and sends every call through an agentsafe.Gateway: logged before it's forwarded, settled after a crash, and
 // recorded with what came back. See docs/MCP_PROXY.md.
 //
-// A tool with a Policy is protected by an idempotency key: a repeated operation is answered from the log, a
-// changed one is a conflict, and the key reaches the upstream where it can deduplicate. A tool without one is
-// passed through and logged. Approvals come in a later phase.
+// Only tools with a Policy are exposed to the agent: the proxy fails closed. A policy protects a tool with an
+// idempotency key (a repeated operation is answered from the log, a changed one is a conflict, and the key
+// reaches the upstream where it can deduplicate) and, if it says so, a person's approval; or it passes the tool
+// through, logged but unprotected ("pass": true). The upstream's tools are read once, at Open: a tool it adds
+// later isn't exposed until the proxy restarts, and then only with a policy.
 package mcp
 
 import (
@@ -22,9 +24,11 @@ const MetaPrefix = "io.github.ashutosh2308bhardwaj.agentsafe/"
 
 // Proxy is an MCP server whose tools are an upstream MCP server's, every call going through a Gateway.
 type Proxy struct {
-	gateway  *agentsafe.Gateway
-	upstream *sdk.ClientSession
-	tools    []*sdk.Tool
+	gateway     *agentsafe.Gateway
+	upstream    *sdk.ClientSession
+	tools       []*sdk.Tool
+	hidden      []string // upstream tools with no policy: not exposed
+	unprotected []string // "pass" tools the upstream doesn't mark read-only: exposed, forwarded without protection
 }
 
 // Open lists the upstream's tools and opens a Gateway on log for them, each protected by its policy (keyed by
@@ -41,25 +45,13 @@ func Open(ctx context.Context, upstream *sdk.ClientSession, log agentsafe.Log, p
 		if err != nil {
 			return nil, fmt.Errorf("listing the upstream's tools: %w", err)
 		}
-		schema, err := json.Marshal(t.InputSchema)
+		seen[t.Name] = true
+		tool, err := p.adopt(t, policies)
 		if err != nil {
-			return nil, fmt.Errorf("tool %s: input schema: %w", t.Name, err)
+			return nil, err
 		}
-		p.tools, seen[t.Name] = append(p.tools, t), true
-		base := upstreamTool{session: upstream, spec: agentsafe.ToolSpec{Name: t.Name, Description: t.Description, Parameters: schema}}
-		policy, ok := policies[t.Name]
-		if !ok {
-			tools = append(tools, &base)
-			continue
-		}
-		if err := policy.check(t); err != nil {
-			return nil, fmt.Errorf("%w: policy for %s: %w", agentsafe.ErrConfig, t.Name, err)
-		}
-		keyed := keyedTool{upstreamTool: base, policy: policy}
-		if policy.Approval == "always" {
-			tools = append(tools, &gatedTool{keyed})
-		} else {
-			tools = append(tools, &keyed)
+		if tool != nil {
+			p.tools, tools = append(p.tools, t), append(tools, tool)
 		}
 	}
 	for name := range policies {
@@ -84,6 +76,42 @@ func (p *Proxy) Server(impl *sdk.Implementation) *sdk.Server {
 	}
 	return s
 }
+
+// adopt turns one upstream tool into what the Gateway serves, as its policy says: nil (no policy: not exposed),
+// passed through, keyed, or keyed and gated.
+func (p *Proxy) adopt(t *sdk.Tool, policies map[string]Policy) (agentsafe.Tool, error) {
+	policy, ok := policies[t.Name]
+	if !ok {
+		p.hidden = append(p.hidden, t.Name) // fail closed
+		return nil, nil
+	}
+	if err := policy.check(t); err != nil {
+		return nil, fmt.Errorf("%w: policy for %s: %w", agentsafe.ErrConfig, t.Name, err)
+	}
+	schema, err := json.Marshal(t.InputSchema)
+	if err != nil {
+		return nil, fmt.Errorf("tool %s: input schema: %w", t.Name, err)
+	}
+	base := upstreamTool{session: p.upstream, spec: agentsafe.ToolSpec{Name: t.Name, Description: t.Description, Parameters: schema}}
+	switch {
+	case policy.Pass:
+		if t.Annotations == nil || !t.Annotations.ReadOnlyHint {
+			p.unprotected = append(p.unprotected, t.Name)
+		}
+		return &base, nil
+	case policy.Approval == "always":
+		return &gatedTool{keyedTool{upstreamTool: base, policy: policy}}, nil
+	default:
+		return &keyedTool{upstreamTool: base, policy: policy}, nil
+	}
+}
+
+// Hidden are the upstream's tools that have no policy, and so aren't exposed to the agent.
+func (p *Proxy) Hidden() []string { return p.hidden }
+
+// Unprotected are the tools passed through ("pass": true) that the upstream doesn't mark read-only: each call
+// is logged, but nothing stops a repeat or asks anyone first. Worth a warning at startup.
+func (p *Proxy) Unprotected() []string { return p.unprotected }
 
 // Close stops the proxy taking calls. It doesn't close the upstream session: whoever opened it does.
 func (p *Proxy) Close() error { return p.gateway.Close() }

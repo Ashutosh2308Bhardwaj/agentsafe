@@ -111,12 +111,15 @@ From [docs/FAILURES.md](docs/FAILURES.md), observed against real models (Gemini,
 
 The model can't tell "failed" from "succeeded but unconfirmed", and it isn't its job to. **Delivery from this caller is at-least-once whatever you do; exactly-once has to come from the effect.**
 
-## Under any agent framework: the MCP proxy
+## Framework-independent, through MCP: the proxy
 
 Most agents aren't Go programs: they're LangGraph, the OpenAI Agents SDK, Claude Code, getting their tools from MCP
 servers. Put `agentsafe-mcp` in front of a server, in the agent's MCP configuration, and every tool call goes through
 agentsafe: logged before it's forwarded, a repeated operation answered from the log, an unknown outcome retried only
 with a key the server honours, and `approval: always` tools waiting for a person. The agent's code doesn't change.
+
+Today it's a **tool** proxy for **one stdio MCP server**, and it **fails closed**: tools without a policy aren't exposed.
+Streamable HTTP and several servers are planned.
 
 ```bash
 go install github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/cmd/agentsafe-mcp@latest

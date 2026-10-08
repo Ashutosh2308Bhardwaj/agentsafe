@@ -31,8 +31,12 @@ const (
 // MetaKeyIdempotency is the _meta key the idempotency key travels under in KeyMeta mode.
 const MetaKeyIdempotency = MetaPrefix + "idempotency-key"
 
-// Policy is how the proxy protects one upstream tool. A tool without one is passed through and logged.
+// Policy is how the proxy protects one upstream tool. A tool without one isn't exposed to the agent at all: the
+// proxy fails closed, so a tool the server adds tomorrow isn't forwarded until someone writes its policy.
 type Policy struct {
+	// Pass forwards the tool unprotected: logged, but no key and no approval. It's how you say "I know", for
+	// reads and for tools whose effects don't matter; it can't be combined with the fields below.
+	Pass bool `json:"pass"`
 	// Identity names the arguments that make a call one operation: they're hashed into its key. A refund's
 	// might be ticket_id and charge_id. The other arguments are its payload: the same operation with a
 	// different payload is a conflict, never a second effect.
@@ -81,6 +85,9 @@ func (p *Policy) check(t *sdk.Tool) error {
 
 // consistent checks the policy's fields against each other.
 func (p *Policy) consistent() error {
+	if p.Pass && (len(p.Identity) > 0 || p.Key != KeyNone || p.KeyArgument != "" || p.Approval == "always") {
+		return errors.New("pass forwards the tool unprotected: it can't have identity, a key or an approval")
+	}
 	if err := p.keyRules(); err != nil {
 		return err
 	}

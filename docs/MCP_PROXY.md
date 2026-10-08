@@ -13,7 +13,7 @@ An MCP proxy changes that. It sits between any MCP client and the MCP servers it
 { "command": "npx", "args": ["-y", "@acme/payments-mcp"] }
 
 // after: through agentsafe, with a policy file
-{ "command": "agentsafe-mcp", "args": ["--policy", "agentsafe.yaml", "--", "npx", "-y", "@acme/payments-mcp"] }
+{ "command": "agentsafe-mcp", "args": ["--log", "calls.jsonl", "--policy", "policy.json", "--", "npx", "-y", "@acme/payments-mcp"] }
 ```
 
 The agent's code doesn't change, and neither does the server's.
@@ -65,7 +65,9 @@ Two deliverables, in a new module `github.com/Ashutosh2308Bhardwaj/agentsafe/mcp
                                log (file / SQLite / Postgres)
 ```
 
-v1 transports: **stdio towards the agent** (what every client supports) and **stdio or Streamable HTTP towards upstreams**. Several upstreams can be proxied at once; their tools are listed with a server prefix when names collide.
+Proposed: **stdio towards the agent**, and **stdio or Streamable HTTP towards upstreams**, several at once, their tools prefixed when names collide.
+
+**As built (v0.1):** a **tool** proxy for **one upstream**, **stdio on both sides** in the binary (`mcp.Open` takes any `*ClientSession`, so a Go program can connect it to a Streamable HTTP upstream itself). Only tools are proxied: resources, prompts, completions and the rest are not, and the agent doesn't see them through the proxy. Several upstreams, prefixing, and Streamable HTTP in either direction are planned, not built.
 
 ## The call path
 
@@ -108,7 +110,7 @@ The model typically tells its user it's waiting, and calls the tool again later.
 
 **As built:** the approver is the OS account running `agentsafe-mcp approve` (`user:` + username, from the process's uid), not an `--as` flag, which anyone could set. In the log, a proxy run never pauses: `approval_requested` answers the call and the run stays `open`; decisions arrive between calls, addressed by key (format v5, `FORMAT.md`). The pending result is not an MCP error (`isError` false), and carries `{status, key}` as structured content.
 
-## Unconfigured tools (decided: see Decisions)
+## Unconfigured tools (decided: fail closed)
 
 A tool without a policy can be:
 
@@ -116,7 +118,7 @@ A tool without a policy can be:
 - **(b) refused**: only tools with a policy can be called.
 - **(c) read-only passed through, writes refused**: trust `readOnlyHint`. But it's self-reported by the server, so a mislabelled write slips through.
 
-**Recommendation: (a) by default, `strict: true` for (b)**, and a startup warning listing every unprotected tool that isn't marked read-only. (b) is safer, but it makes the first run a wall of refusals, and people turn safety off when the first experience is friction.
+The proposal recommended (a), for an easy first run. **Changed in mcp v0.2.0 to (b), fail closed**, after an outside review: a safety gateway is an allow-list. A server that adds `delete_account` tomorrow must not have it forwarded, unprotected, on the next restart. A tool without a policy **isn't exposed at all** (not listed, not callable); `"pass": true` forwards a tool unprotected on purpose; and at startup the binary warns about every hidden tool and every passed-through tool not marked read-only. The upstream's tools are read once, at startup: one added later appears only after a restart, and only with a policy.
 
 ## The log: tool-only runs
 
@@ -141,12 +143,12 @@ A proxy run has no budget and no final answer: it's open for the proxy's lifetim
                        "approval": "always", "timeout": "10s" } } }
 ```
 
-Scope, started-by and the log are command-line flags (`--scope`, `--started-by`, `--log`). Not built yet: `strict` (refuse unconfigured tools), `read_only`, and choosing SQLite / Postgres / sealing from the binary (the library takes any `agentsafe.Log`, all three included).
+Scope, started-by and the log are command-line flags (`--scope`, `--started-by`, `--log`). A read is passed through with `{"pass": true}`. Not built yet: choosing SQLite / Postgres / sealing from the binary (the library takes any `agentsafe.Log`, all three included).
 
 ## What's deliberately out of v1
 
 - Grounding checks in YAML. A declarative check language is a project of its own; Go users get `Check` in library mode.
-- Proxying resources, prompts, sampling: tools only. Everything else passes through untouched.
+- Proxying resources, prompts, completions: **not proxied at all** (the agent doesn't see them through the proxy). The product is about consequential tool calls; the rest can come later.
 - HTTP transport towards the agent, an approval web UI, multi-tenant scopes from `_meta`.
 
 ## Testing
@@ -171,7 +173,7 @@ The same standard as the library:
 
 Made on 2026-10-07, when building started (the maintainer took the recommended defaults):
 
-1. **Unconfigured tools pass through, logged, unprotected**; `strict` (refuse them) is an opt-in, not built yet.
+1. ~~Unconfigured tools pass through~~ → **fail closed** (2026-10-08, mcp v0.2.0, the maintainer's call after an outside review): no policy, not exposed; `"pass": true` to forward unprotected on purpose.
 2. **Approvals as "pending" tool results**; MCP tasks / multi round-trip when the major clients support them.
 3. **One log per scope, growth documented**; snapshots of the key index later.
 4. **stdio towards the agent** only, for now.

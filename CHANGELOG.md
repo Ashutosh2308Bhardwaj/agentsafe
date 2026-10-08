@@ -6,6 +6,18 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Changed (breaking, `mcp`)
+
+- **The proxy fails closed.** A tool without a policy is no longer passed through: it isn't exposed to the agent
+  at all (not listed, not callable). `{"pass": true}` forwards a tool unprotected on purpose. `Proxy.Hidden` and
+  `Proxy.Unprotected` list both kinds, and `agentsafe-mcp` warns about them at startup. A server that adds a tool
+  (`delete_account`) doesn't get it forwarded until someone writes its policy.
+
+### Documentation
+
+- `mcp` is described as what it is: a tool proxy for one stdio upstream. Resources and prompts aren't proxied, and
+  several upstreams and Streamable HTTP are planned, not built (`docs/MCP_PROXY.md` claimed otherwise).
+
 ## [0.4.0] - 2026-10-08
 
 agentsafe under any agent framework: the core gains `Gateway`, for tool calls that arrive from outside an agent
