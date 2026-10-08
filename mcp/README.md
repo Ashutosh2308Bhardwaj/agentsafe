@@ -62,6 +62,10 @@ With a policy for a tool:
   answers with the first result; with `none` the outcome is recorded as unknown and **never retried**.
   `TestKilledAfterTheUpstreamChargedThenRestarted` kills the proxy right after the server charged: one
   charge in every mode, two without a policy.
+- **`key: meta` or `argument` is your claim that the server deduplicates on the key**: agentsafe-mcp can't know. Check
+  it against a sandbox of the server with `mcptest.SameKey`, which calls the tool the way the proxy does: one call
+  with a new key (one effect), then 20 at once with one key (still one effect, one answer). It catches a server that
+  ignores the key and one that checks and charges without a lock.
 - A call missing an identity field is refused before it's forwarded. Policies are checked against the
   server's real tools at startup: a misspelt tool or argument fails loudly instead of leaving a tool bare.
 
@@ -85,6 +89,6 @@ With `approval: always`:
 
 ## Not yet
 
-`resolve` (a person recording what became of an unknown outcome), a verifier that
-a server really deduplicates on its key, choosing SQLite / Postgres / sealing from the binary (the library takes any
+`resolve` (a person recording what became of an unknown outcome), an `agentsafe-mcp verify` command (today the check
+is `mcptest.SameKey`, from Go), choosing SQLite / Postgres / sealing from the binary (the library takes any
 `agentsafe.Log`), several upstreams, and Streamable HTTP. See the design.

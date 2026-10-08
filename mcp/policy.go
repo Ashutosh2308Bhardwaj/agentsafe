@@ -212,6 +212,33 @@ func (t *gatedTool) Summary(args json.RawMessage) (any, error) {
 // Timeout is the policy's per-call timeout (agentsafe.TimeoutTool).
 func (t *keyedTool) Timeout() time.Duration { return time.Duration(t.policy.Timeout) }
 
+// KeyedTool is one of the upstream's tools, protected by policy, as the proxy calls it: an agentsafe.IdempotentTool
+// whose CallWithKey sends the key where the policy says. It's for checking that the server really deduplicates on
+// that key (mcptest.SameKey), not for serving: Open builds the proxy's own.
+func KeyedTool(ctx context.Context, upstream *sdk.ClientSession, name string, policy Policy) (agentsafe.IdempotentTool, error) {
+	for t, err := range upstream.Tools(ctx, nil) {
+		if err != nil {
+			return nil, fmt.Errorf("listing the upstream's tools: %w", err)
+		}
+		if t.Name != name {
+			continue
+		}
+		if err := policy.check(t); err != nil {
+			return nil, fmt.Errorf("%w: policy for %s: %w", agentsafe.ErrConfig, name, err)
+		}
+		if policy.Pass || len(policy.Identity) == 0 || policy.Key == KeyNone {
+			return nil, fmt.Errorf("%w: %s: only a policy that sends a key (meta or argument) can be checked", agentsafe.ErrConfig, name)
+		}
+		schema, err := json.Marshal(t.InputSchema)
+		if err != nil {
+			return nil, err
+		}
+		return &keyedTool{upstreamTool: upstreamTool{session: upstream, spec: agentsafe.ToolSpec{Name: t.Name,
+			Description: t.Description, Parameters: schema}}, policy: policy}, nil
+	}
+	return nil, fmt.Errorf("%w: the upstream has no tool %q", agentsafe.ErrConfig, name)
+}
+
 var (
 	_ agentsafe.IdempotentTool = (*keyedTool)(nil)
 	_ agentsafe.Gated          = (*gatedTool)(nil)
