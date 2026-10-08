@@ -2,9 +2,17 @@
 
 All notable changes are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0, a minor version (0.x.0) may contain breaking changes; each is listed under **Breaking**.
 
-Each module is versioned and tagged separately: `v0.1.0` is the core (`github.com/Ashutosh2308Bhardwaj/agentsafe`); `sqlite/v0.1.0`, `postgres/v0.1.0`, `anthropic/v0.1.0` and `gemini/v0.1.0` are the modules in those directories.
+Each module is versioned and tagged separately: `v0.1.0` is the core (`github.com/Ashutosh2308Bhardwaj/agentsafe`); `sqlite/v0.1.0`, `postgres/v0.1.0`, `anthropic/v0.1.0`, `gemini/v0.1.0` and `mcp/v0.1.0` are the modules in those directories. `mcp` is versioned on its own (it started at v0.1.0 with core v0.4.0).
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-10-08
+
+agentsafe under any agent framework: the core gains `Gateway`, for tool calls that arrive from outside an agent
+loop, and the new module **`agentsafe/mcp` v0.1.0** puts it between any MCP client (LangGraph, the OpenAI Agents
+SDK, Claude Code, …) and the MCP servers it uses: `agentsafe-mcp --log calls.jsonl --policy policy.json -- <server>`.
+See [docs/MCP_PROXY.md](docs/MCP_PROXY.md) and [mcp/README.md](mcp/README.md). The other modules move to v0.4.0.
+**A v0.3 library refuses a v5 log** (proxy runs): don't roll a library back under a log a newer one wrote.
 
 ### Added
 
@@ -13,9 +21,8 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   `open` between calls; agent and proxy events can't mix in one run. A v0.3 library refuses v5 logs.
 - `Gateway` (`OpenGateway`, `Call`, `Close`): tool calls that arrive from outside an agent loop get the
   Runner's guarantees: logged before they run, a repeated operation answered from the log, conflicts, keys.
-  It holds the log's lease while open, and on open settles a call a crash left unfinished: refused if it was
-  never forwarded, retried with its key if the tool takes one, otherwise recorded as an unknown outcome and
-  never run again.
+  It settles a call a crash left unfinished: refused if it was never forwarded, retried with its key if the
+  tool takes one, otherwise recorded as an unknown outcome and never run again.
 - **Approvals through a Gateway.** A gated call is answered at once with `pending_approval` and its key, and the run
   stays open: other calls go on. `Gateway.Approve` / `Reject` decide by key (through the `Authorizer`, with
   maker-checker against `WithStartedBy`), and `Pending` lists what waits. The next call for the operation runs if
@@ -29,6 +36,21 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   still answers an operation it saw finish, but an unknown outcome is never retried: it's recorded as "outcome
   unknown" under the key, so the operation asked for again gets that answer, never a second attempt. Applies
   during a call (one attempt) and after a crash (a started call isn't re-run).
+- **`agentsafe/mcp` v0.1.0** (new module, Go 1.25, official MCP Go SDK v1.8.0): `mcp.Open` / `Proxy.Server` and the
+  `agentsafe-mcp` binary. Per-tool policies (`mcp.Config`): identity fields make the key; the key reaches the
+  upstream in `_meta`, as a tool argument, or not at all; `approval: always`; approvers. `agentsafe-mcp pending`,
+  `approve`, `reject` decide as the OS account running them. Tested by kill tests per key mode and, in CI, a
+  LangGraph agent (`mcp/examples/langgraph`).
+- Examples: [subscription](examples/subscription) (an HTTP call that times out or crashes after a billed change),
+  [refund](examples/refund) (grounding, approval, maker-checker, a crash after the money moved) and
+  [outbox](sqlite/examples/outbox) (a database write, its key and its email in one transaction), each with a
+  process-level test with real kills and a control run without the key.
+
+### Fixed
+
+- Console lines mark where they cut a value ("…"); a cut amount could read as a different one.
+- The examples' crash hooks never return after sending SIGKILL: the signal is delivered asynchronously, and a
+  process could write one more log line after its "kill point". The money sweep's hook too.
 
 ## [0.3.0] - 2026-10-07
 
@@ -137,7 +159,8 @@ The first release: correctness primitives for LLM agents that act on money, hard
 - A payout a human rejected could be approved if the model proposed it again under a new call id (found by property tests).
 - The example gateway charged once per key only for sequential calls, not simultaneous ones.
 
-[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/releases/tag/v0.1.0

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Ashutosh2308Bhardwaj/agentsafe/actions/workflows/ci.yml/badge.svg)](https://github.com/Ashutosh2308Bhardwaj/agentsafe/actions/workflows/ci.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Ashutosh2308Bhardwaj/agentsafe/badge)](https://scorecard.dev/viewer/?uri=github.com/Ashutosh2308Bhardwaj/agentsafe) [![Go Reference](https://pkg.go.dev/badge/github.com/Ashutosh2308Bhardwaj/agentsafe.svg)](https://pkg.go.dev/github.com/Ashutosh2308Bhardwaj/agentsafe)
 
-> **Status: v0.3.0, pre-1.0** ([CHANGELOG](CHANGELOG.md)). The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
+> **Status: v0.4.0, pre-1.0** ([CHANGELOG](CHANGELOG.md)). The guarantees below are proven under the conditions stated; the gaps to production are tracked item by item in [SCORECARD.md](SCORECARD.md).
 
 ```bash
 go get github.com/Ashutosh2308Bhardwaj/agentsafe
@@ -111,6 +111,25 @@ From [docs/FAILURES.md](docs/FAILURES.md), observed against real models (Gemini,
 
 The model can't tell "failed" from "succeeded but unconfirmed", and it isn't its job to. **Delivery from this caller is at-least-once whatever you do; exactly-once has to come from the effect.**
 
+## Under any agent framework: the MCP proxy
+
+Most agents aren't Go programs: they're LangGraph, the OpenAI Agents SDK, Claude Code, getting their tools from MCP
+servers. Put `agentsafe-mcp` in front of a server, in the agent's MCP configuration, and every tool call goes through
+agentsafe: logged before it's forwarded, a repeated operation answered from the log, an unknown outcome retried only
+with a key the server honours, and `approval: always` tools waiting for a person. The agent's code doesn't change.
+
+```bash
+go install github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/cmd/agentsafe-mcp@latest
+```
+
+```jsonc
+{ "command": "agentsafe-mcp", "args": ["--log", "calls.jsonl", "--policy", "policy.json", "--", "npx", "-y", "@acme/billing-mcp"] }
+```
+
+[mcp/README.md](mcp/README.md) has the policy file and the approval commands; [mcp/examples/langgraph](mcp/examples/langgraph)
+is a LangGraph agent doing it, run in CI; [docs/MCP_PROXY.md](docs/MCP_PROXY.md) is the design, including what the proxy
+can't guarantee (it sees calls, not the model's decisions).
+
 ## The primitives
 
 ```go
@@ -174,6 +193,7 @@ Each runs offline (scripted model, fake external system), and each has a test th
 |---|---|---|
 | [quickstart](examples/quickstart) | A payout must wait for a human, across restarts | The run waits durably at the approval gate; approving in a new process pays once |
 | [refund](examples/refund) | The model proposes the wrong amount; the wrong person approves; the process dies right after the money moved | `Check` refuses the amount against the real charge; the `Authorizer` and maker-checker refuse the approvers; the refund is retried with its key: one refund. Without the key: two |
+| [langgraph](mcp/examples/langgraph) | A Python LangGraph agent bills through an MCP server; charging needs approval | `agentsafe-mcp` in its MCP config, no agentsafe code: pending, a person approves from the command line, charged once, repeats answered from the log |
 | [outbox](sqlite/examples/outbox) | Killed after a database write, before the agent logged it; killed between the write and its email | The credit, its key and its email commit in one transaction; the outbox worker resends with a key; reconciliation fails the control run |
 | [subscription](examples/subscription) | An HTTP call times out, or the process dies, right after the API made a billed change | The unknown outcome is retried with the same idempotency key: one invoice. Without the key: two |
 | [reconcile](examples/reconcile) | A model reconciling a ledger gets values wrong; a gateway under-pays or drops a write | Grounding refuses wrong values; the approval gate; reconciliation catches what every report missed |

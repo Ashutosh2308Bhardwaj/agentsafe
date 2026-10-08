@@ -32,7 +32,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const version = "0.1.0-dev"
+const version = "0.1.0"
 
 func main() {
 	var err error

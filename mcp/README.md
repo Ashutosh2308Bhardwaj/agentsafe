@@ -1,7 +1,10 @@
 # agentsafe/mcp: an MCP proxy
 
-**Status: in development, phases 1–3 of [the design](../docs/MCP_PROXY.md). Not released**, and it needs the
-core's `Gateway`, which isn't in a release yet either.
+**Status: v0.1.0** ([the design](../docs/MCP_PROXY.md), what's built and what isn't). Requires agentsafe v0.4.0.
+
+```bash
+go install github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/cmd/agentsafe-mcp@latest
+```
 
 Put `agentsafe-mcp` in front of any MCP server in your agent's configuration, and every tool call goes through
 agentsafe first. The agent's code and the server don't change.
@@ -69,4 +72,5 @@ With `approval: always`:
 
 ## Not yet
 
-YAML policies and the Python end-to-end example (phase 4). See the design.
+`resolve` (a person recording what became of an unknown outcome), `strict` (refuse tools without a policy), and
+choosing SQLite / Postgres / sealing from the binary (the library takes any `agentsafe.Log`). See the design.
