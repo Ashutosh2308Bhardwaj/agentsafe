@@ -16,6 +16,10 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   It holds the log's lease while open, and on open settles a call a crash left unfinished: refused if it was
   never forwarded, retried with its key if the tool takes one, otherwise recorded as an unknown outcome and
   never run again. Approvals through a Gateway come later; a gated tool is refused at `OpenGateway`.
+- `KeyHonouring`: an `IdempotentTool` can report that the system it calls can't deduplicate on its key. The log
+  still answers an operation it saw finish, but an unknown outcome is never retried: it's recorded as "outcome
+  unknown" under the key, so the operation asked for again gets that answer, never a second attempt. Applies
+  during a call (one attempt) and after a crash (a started call isn't re-run).
 
 ## [0.3.0] - 2026-10-07
 

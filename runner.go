@@ -3,6 +3,7 @@ package agentsafe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -182,40 +183,58 @@ func (r *Runner) loop(ctx context.Context, st State) (State, error) {
 // otherwise tool_started → execute → tool_result.
 func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 	tool := r.find(c.Function.Name)
-	var key, ph string
-	if it, ok := tool.(IdempotentTool); ok && json.Valid([]byte(c.Function.Arguments)) {
-		// If the call can't be identified, it runs without a key and fails on its own validation.
-		if k, p, err := keyFor(r.scope(), it, json.RawMessage(c.Function.Arguments), st.KeyBits); err == nil {
-			key, ph = k, p
-		}
+	key, ph := r.operation(tool, c, st.KeyBits)
+	if prev, seen := st.Effects[key]; key != "" && seen {
+		return r.answerFromLog(ctx, st, c, key, ph, prev) // the log has seen this operation finish: nothing runs
 	}
-
-	if key != "" {
-		if prev, seen := st.Effects[key]; seen {
-			// The log has already seen this operation complete. Nothing runs.
-			result, how := replay(prev.Result), "replayed"
-			if prev.PayloadHash != ph {
-				result, how = conflict(key), "CONFLICT"
-			}
-			if err := r.emit(ctx, st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
-				return err
-			}
-			if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph, Replayed: true}); err != nil {
-				return err
-			}
-			r.logf("    %s(%s) -> %s from the log: %s", c.Function.Name, clip(r.show(c.Function.Arguments), 60), how, clip(r.show(result), 80))
-			r.hook("after_result_logged")
-			return nil
-		}
-	}
-
 	if proceed, err := r.gate(ctx, st, tool, c, key); err != nil || !proceed {
 		return err
 	}
+	return r.run(ctx, st, tool, c, key, ph)
+}
 
+// operation is the call's idempotency key and payload hash, or "" if the tool has no key. A call that can't be
+// identified runs without a key, and fails on its own validation.
+func (r *Runner) operation(tool Tool, c ToolCall, bits int) (key, payloadHash string) {
+	it, ok := tool.(IdempotentTool)
+	if !ok || !json.Valid([]byte(c.Function.Arguments)) {
+		return "", ""
+	}
+	key, payloadHash, err := keyFor(r.scope(), it, json.RawMessage(c.Function.Arguments), bits)
+	if err != nil {
+		return "", ""
+	}
+	return key, payloadHash
+}
+
+// answerFromLog resolves a repeated operation from its recorded outcome: the same result, marked as a replay,
+// or a conflict if the values changed.
+func (r *Runner) answerFromLog(ctx context.Context, st *State, c ToolCall, key, ph string, prev Outcome) error {
+	result, how := replay(prev.Result), "replayed"
+	if prev.PayloadHash != ph {
+		result, how = conflict(key), "CONFLICT"
+	}
+	if err := r.emit(ctx, st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
+		return err
+	}
+	if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key, PayloadHash: ph, Replayed: true}); err != nil {
+		return err
+	}
+	r.logf("    %s(%s) -> %s from the log: %s", c.Function.Name, clip(r.show(c.Function.Arguments), 60), how, clip(r.show(result), 80))
+	r.hook("after_result_logged")
+	return nil
+}
+
+// run executes a call that passed the gate: tool_started (write-ahead), the effect, tool_result.
+func (r *Runner) run(ctx context.Context, st *State, tool Tool, c ToolCall, key, ph string) error {
+	blind := key != "" && !honoursKey(tool) // keyed, but the system it calls can't deduplicate a retry
 	if st.Started[c.ID] {
 		// Started before a crash, no result logged: it MAY have executed. For an IdempotentTool, the same key
-		// goes back into the tool, which returns the original outcome instead of acting twice.
+		// goes back into the tool, which returns the original outcome instead of acting twice. Unless the
+		// system it calls can't deduplicate: then nothing can tell, and it's never tried again.
+		if blind {
+			return r.recordUnknown(ctx, st, c, key, ph, "was running when the process stopped")
+		}
 		r.logf("    ↻ %s (%s) was started before a crash and may have executed; retrying with the same key", c.Function.Name, c.ID)
 	}
 	if err := r.emit(ctx, st, Event{Type: EvToolStarted, CallID: c.ID, Tool: c.Function.Name, Args: c.Function.Arguments, Key: key, PayloadHash: ph}); err != nil {
@@ -224,6 +243,9 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 	r.hook("before_tool_executed")
 	result, err := r.execute(ctx, tool, c, key)
 	r.hook("after_tool_executed") // THE point week 2 had to close: effect done, result not yet logged
+	if err != nil && blind && errors.Is(err, ErrInDoubt) {
+		return r.recordUnknown(ctx, st, c, key, ph, "didn't return a known outcome")
+	}
 	if err != nil {
 		// In doubt: log nothing. The run is now exactly as after a crash here, and Continue retries the key.
 		r.logf("    ? %s left in doubt: %s", c.Function.Name, r.show(err.Error()))
@@ -233,6 +255,21 @@ func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 		return err
 	}
 	r.logf("    %s(%s) -> %s", c.Function.Name, clip(r.show(c.Function.Arguments), 70), clip(r.show(result), 90))
+	r.hook("after_result_logged")
+	return nil
+}
+
+// recordUnknown resolves a call whose outcome can't be known and can't be safely retried: the downstream
+// can't deduplicate on its key. It's recorded under the key, so the operation, asked for again, gets this
+// answer from the log and is never attempted a second time.
+func (r *Runner) recordUnknown(ctx context.Context, st *State, c ToolCall, key, ph, why string) error {
+	res := errorJSON(fmt.Errorf("%w: %s %s. It may or may not have happened, and the system it calls can't "+
+		"deduplicate a retry, so it won't be tried again (operation %s). Check before asking for it again",
+		ErrOutcomeUnknown, c.Function.Name, why, key))
+	r.logf("    ? %s: outcome unknown, recorded under %s; never retried (the downstream can't deduplicate)", c.Function.Name, key)
+	if err := r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: res, Key: key, PayloadHash: ph}); err != nil {
+		return err
+	}
 	r.hook("after_result_logged")
 	return nil
 }

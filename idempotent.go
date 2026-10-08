@@ -34,6 +34,23 @@ type IdempotentTool interface {
 	CallWithKey(ctx context.Context, key string, args json.RawMessage) (any, error)
 }
 
+// KeyHonouring is implemented by an IdempotentTool that knows whether the system it calls deduplicates on the
+// key. A key does two jobs: the log answers an operation it saw finish (always), and a retry after an outcome
+// the log couldn't see is safe (only if the downstream honours the key). A tool that reports false keeps the
+// first job and gives up the second: an unknown outcome is never retried. The call is recorded as "outcome
+// unknown" under its key, so asking for the operation again gets that answer instead of a second attempt.
+//
+// A tool that doesn't implement KeyHonouring honours its key: that's what IdempotentTool asks of CallWithKey.
+// An MCP server with no way to receive a key is the case this exists for (agentsafe/mcp).
+type KeyHonouring interface {
+	HonoursKey() bool
+}
+
+func honoursKey(t Tool) bool {
+	kh, ok := t.(KeyHonouring)
+	return !ok || kh.HonoursKey()
+}
+
 // Canonical is the JSON used for hashing: object keys sorted, numbers normalised (4200 == 4200.0).
 func Canonical(v any) (string, error) {
 	b, err := json.Marshal(v)

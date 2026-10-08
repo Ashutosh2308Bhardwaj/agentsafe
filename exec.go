@@ -153,6 +153,9 @@ func (r *Runner) retryPolicy(tool Tool, key string) (attempts int, backoff time.
 	if _, ok := tool.(IdempotentTool); !ok || key == "" {
 		return 1, r.ToolBackoff, false
 	}
+	if !honoursKey(tool) { // a retry could do it twice: one attempt, and an unknown outcome is recorded (step)
+		return 1, r.ToolBackoff, true
+	}
 	attempts, backoff = r.ToolAttempts, r.ToolBackoff
 	if attempts <= 0 {
 		attempts = 3
