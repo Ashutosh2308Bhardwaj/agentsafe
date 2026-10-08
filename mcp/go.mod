@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/mcp
 go 1.25.0
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.4.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 )
 

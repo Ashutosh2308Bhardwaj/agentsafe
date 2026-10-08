@@ -1,5 +1,5 @@
-github.com/Ashutosh2308Bhardwaj/agentsafe v0.4.0 h1:mZl64jMroc3c0e4yKr2WoeRALK4OSpZjUxuxh/QcKjs=
-github.com/Ashutosh2308Bhardwaj/agentsafe v0.4.0/go.mod h1:Qazy43WFA7E8rmKGByfAL2Bb3ocO7eCzreVu0SUdQCI=
+github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0 h1:aL3dMZQTdHZNE0UBno6q0qR9L0x8MKSDTQpJa5xD5vc=
+github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0/go.mod h1:Qazy43WFA7E8rmKGByfAL2Bb3ocO7eCzreVu0SUdQCI=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

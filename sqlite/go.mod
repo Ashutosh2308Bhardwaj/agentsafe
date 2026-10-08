@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/sqlite
 go 1.26.0
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.4.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0
 	modernc.org/sqlite v1.60.1
 )
 

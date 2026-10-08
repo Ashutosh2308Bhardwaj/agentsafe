@@ -3,7 +3,7 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/anthropic
 go 1.25
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.4.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0
 	github.com/anthropics/anthropic-sdk-go v1.78.0
 )
 
