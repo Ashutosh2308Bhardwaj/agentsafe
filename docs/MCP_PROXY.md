@@ -1,6 +1,6 @@
 # Design: agentsafe as an MCP proxy
 
-**Status: proposed (2026-10-07).** Nothing here is built yet. Decisions marked **(decide)** need the maintainer's call before code.
+**Status: phases 1–4 built (2026-10-08), unreleased.** Written as a proposal on 2026-10-07; where the build differs, an **As built** note says so, and [Decisions](#decisions) records what was chosen. The code is `agentsafe.Gateway` (core) and the `agentsafe/mcp` module; usage is in [mcp/README.md](../mcp/README.md).
 
 ## The problem this solves
 
@@ -104,9 +104,11 @@ v1 in detail: a gated call is logged as `approval_requested` and returns a norma
   "message": "Waiting for a human to approve. Nothing was done. Call send_payout again with the same arguments to get the outcome." }
 ```
 
-The model typically tells its user it's waiting, and calls the tool again later. The same arguments give the same key: approved → it runs (once); rejected → refused; still waiting → the same pending result. **The decision is made outside the agent**: `agentsafe-mcp approve <key> --as <identity>` or `reject`, checked by the policy's `Authorizer` (an allow-list plus maker-checker against the configured `started_by` identity), and logged with who decided. An HTTP approval endpoint with real authentication is a later phase.
+The model typically tells its user it's waiting, and calls the tool again later. The same arguments give the same key: approved → it runs (once); rejected → refused; still waiting → the same pending result. **The decision is made outside the agent**: `agentsafe-mcp approve <key>` or `reject`, checked by the policy's `Authorizer` (an allow-list plus maker-checker against the configured `started_by` identity), and logged with who decided. An HTTP approval endpoint with real authentication is a later phase.
 
-## Unconfigured tools (decide)
+**As built:** the approver is the OS account running `agentsafe-mcp approve` (`user:` + username, from the process's uid), not an `--as` flag, which anyone could set. In the log, a proxy run never pauses: `approval_requested` answers the call and the run stays `open`; decisions arrive between calls, addressed by key (format v5, `FORMAT.md`). The pending result is not an MCP error (`isError` false), and carries `{status, key}` as structured content.
+
+## Unconfigured tools (decided: see Decisions)
 
 A tool without a policy can be:
 
@@ -124,27 +126,22 @@ A proxy log has no model decisions, so the current state machine (which expects 
 - `call_received` (`call_id`, `tool`, `args`, the client's self-reported name) plays the part of `model_decided` for one call;
 - everything after it is unchanged: `tool_started`, `tool_result`, `tool_refused`, `approval_*`, `key_bits`, the hash chain, sealing, redaction.
 
-A proxy run has no budget and no final answer: it's open for the proxy's lifetime, keyed by **scope**. **(decide)** One log per scope (e.g. `support-agent-prod`) that grows forever, or rotation with the key index carried forward? Rebuilding 10k events takes about 27 ms, so a busy proxy reaches seconds of startup within weeks. v1 can ship with one log per scope and a documented limit; snapshots of the key index are the fix. The same lease rules apply: one proxy process per log, enforced by the lease.
+A proxy run has no budget and no final answer: it's open for the proxy's lifetime, keyed by **scope**. (Decided: see Decisions.) One log per scope (e.g. `support-agent-prod`) that grows forever, or rotation with the key index carried forward? Rebuilding 10k events takes about 27 ms, so a busy proxy reaches seconds of startup within weeks. v1 can ship with one log per scope and a documented limit; snapshots of the key index are the fix.
+
+**As built:** the lease is taken **per call**, not for the proxy's lifetime (phase 3: an approval is written by another process). Each call re-reads the log (a few ms at 1k events, `PERFORMANCE.md`); in return, proxies in several processes can share one log, their calls taking turns. A gateway settles an interrupted call only if it serves that call's tool, so an approver's tool-less gateway never mis-settles one.
 
 ## Policy file
 
-```yaml
-scope: support-agent-prod          # keys are unique within a scope
-started_by: support-agent          # the requester, for maker-checker
-log: { sqlite: /var/lib/agentsafe/runs.db }   # or file:, postgres:
-seal_key_env: AGENTSAFE_LOG_KEY    # optional: seal arguments and results at rest
-approvers: [finance@example.com, ops-lead@example.com]
+**As built:** JSON, read with unknown fields refused (a misspelt `"aproval"` fails loudly rather than leaving a tool unprotected), and checked against the upstream's real tools at startup (`mcp.Config`):
 
-tools:
-  create_refund:
-    identity: [ticket_id, charge_id]   # what makes it one operation
-    approval: always                   # or never; thresholds need library mode
-    key: { argument: idempotency_key } # how the upstream deduplicates
-    timeout: 10s
-  get_charge:
-    read_only: true                    # pass through, logged, never gated
-strict: false                          # true: refuse tools without a policy
+```json
+{ "approvers": ["user:alice", "user:bob"],
+  "tools": {
+    "create_refund": { "identity": ["ticket_id", "charge_id"], "key": "argument", "key_argument": "idempotency_key",
+                       "approval": "always", "timeout": "10s" } } }
 ```
+
+Scope, started-by and the log are command-line flags (`--scope`, `--started-by`, `--log`). Not built yet: `strict` (refuse unconfigured tools), `read_only`, and choosing SQLite / Postgres / sealing from the binary (the library takes any `agentsafe.Log`, all three included).
 
 ## What's deliberately out of v1
 
@@ -164,15 +161,18 @@ The same standard as the library:
 
 ## Phases
 
-1. **Pass-through and log**: `call_received` / format v5, stdio both ways, the library package, a fake upstream, client tests.
-2. **Keys**: replay, conflict, in-doubt handling for each `key` mode, `resolve`, kill tests.
-3. **Approvals**: pending results, `approve` / `reject` with an Authorizer, maker-checker.
-4. **The binary and YAML policy**, `reconcile.Audit` over proxy logs, the Python end-to-end example.
-5. **Release** as `mcp/v0.1.0`.
+1. **Pass-through and log**: done. `call_received` / format v5, `Gateway`, stdio both ways, the library package, a fake upstream, in-memory and process tests.
+2. **Keys**: done. `KeyHonouring` in the core, per-tool policies (`meta`, `argument`, `none`), replay, conflict, in-doubt handling per mode, kill tests (one charge per mode, two without a policy). **Not built:** `resolve` (a person recording what became of an unknown outcome).
+3. **Approvals**: done. By key in proxy runs, pending results, `pending` / `approve` / `reject` with an allow-list and maker-checker, as processes with the real OS identity.
+4. **Audit and a real framework**: done. Traces and `reconcile.Audit` over proxy logs; a LangGraph agent (`mcp/examples/langgraph`) run in CI. The policy file is JSON, not YAML (above).
+5. **Release**: the core's next minor version with `mcp/v0.1.0`.
 
-## Decisions needed
+## Decisions
 
-1. Unconfigured tools: (a) pass through by default with `strict` opt-in (recommended), or (b) refuse by default?
-2. v1 approvals as "pending" tool results, with tasks / multi round-trip later: agreed?
-3. Log growth: ship v1 with one log per scope and a documented limit, snapshots later: agreed?
-4. Scope of v1 transports: stdio towards the agent only: agreed?
+Made on 2026-10-07, when building started (the maintainer took the recommended defaults):
+
+1. **Unconfigured tools pass through, logged, unprotected**; `strict` (refuse them) is an opt-in, not built yet.
+2. **Approvals as "pending" tool results**; MCP tasks / multi round-trip when the major clients support them.
+3. **One log per scope, growth documented**; snapshots of the key index later.
+4. **stdio towards the agent** only, for now.
+5. (2026-10-08) **The policy file is JSON**: built, no dependency, strict about unknown fields.
