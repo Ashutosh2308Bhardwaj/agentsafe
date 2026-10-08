@@ -30,8 +30,9 @@ type Proxy struct {
 // Open lists the upstream's tools and opens a Gateway on log for them, each protected by its policy (keyed by
 // tool name; nil: every tool passed through and logged). A policy for a tool the upstream doesn't have is an
 // error: a misspelt name would leave the real tool unprotected. opts are the Gateway's (WithScope,
-// WithStartedBy, WithToolTimeout, WithLogf, WithRedactor, WithHook, ...). The Proxy holds the log's lease
-// until Close.
+// WithStartedBy, WithAuthorizer, WithToolTimeout, WithLogf, WithRedactor, WithHook, ...). Each call takes the
+// log's lease while it runs, so proxies in several processes can share a log, and approvals can be written to
+// it from another process (agentsafe-mcp approve).
 func Open(ctx context.Context, upstream *sdk.ClientSession, log agentsafe.Log, policies map[string]Policy, opts ...agentsafe.Option) (*Proxy, error) {
 	p := &Proxy{upstream: upstream}
 	var tools []agentsafe.Tool
@@ -79,7 +80,7 @@ func (p *Proxy) Server(impl *sdk.Implementation) *sdk.Server {
 	return s
 }
 
-// Close releases the log's lease. It doesn't close the upstream session: whoever opened it does.
+// Close stops the proxy taking calls. It doesn't close the upstream session: whoever opened it does.
 func (p *Proxy) Close() error { return p.gateway.Close() }
 
 // handle is every tools/call: through the Gateway, then back into an MCP result.

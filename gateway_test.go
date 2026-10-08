@@ -150,19 +150,23 @@ func TestGatewaySettlesACallACrashLeftUnfinished(t *testing.T) {
 	}
 }
 
-func TestGatewayHoldsTheLeaseUntilClosed(t *testing.T) {
+// The lease is taken per call, so gateways in two processes can share a log: their calls take turns, and each
+// sees what the other did.
+func TestGatewaysShareALog(t *testing.T) {
 	u := &upstream{paid: map[string]int{}}
 	path := filepath.Join(t.TempDir(), "proxy.jsonl")
-	g := openTestGateway(t, path, u, nil)
-	if _, err := OpenGateway(context.Background(), &FileLog{Path: path}, WithTools(u.tools()...)); !errors.Is(err, ErrRunLocked) {
-		t.Fatalf("a second gateway on the same log must be refused: %v", err)
+	g1, g2 := openTestGateway(t, path, u, nil), openTestGateway(t, path, u, nil)
+	gwCall(t, g1, "pay", `{"ref":"T-77"}`)
+	if r := gwCall(t, g2, "pay", `{"ref":"T-77"}`); !r.Replayed || len(u.paid) != 1 {
+		t.Fatalf("the other gateway's operation is answered from the shared log: %+v paid=%v", r, u.paid)
 	}
-	_ = g.Close()
-	if _, err := g.Call(context.Background(), "c", "get_balance", json.RawMessage(`{}`)); !errors.Is(err, ErrGatewayClosed) {
+	_ = g1.Close()
+	if _, err := g1.Call(context.Background(), "c", "get_balance", json.RawMessage(`{}`)); !errors.Is(err, ErrGatewayClosed) {
 		t.Fatalf("a closed gateway takes no calls: %v", err)
 	}
-	g2 := openTestGateway(t, path, u, nil)
-	_ = g2.Close()
+	if r := gwCall(t, g2, "get_balance", `{}`); r.Result != `"1000.00"` {
+		t.Fatalf("the other is unaffected: %+v", r)
+	}
 }
 
 func TestGatewayRefusesWhatItCantDo(t *testing.T) {
@@ -185,7 +189,7 @@ func TestGatewayRefusesWhatItCantDo(t *testing.T) {
 		return in
 	}))
 	if _, err := OpenGateway(ctx, &FileLog{Path: filepath.Join(t.TempDir(), "p.jsonl")}, WithTools(gated)); !errors.Is(err, ErrConfig) {
-		t.Fatalf("approvals through a gateway aren't supported yet, and must say so: %v", err)
+		t.Fatalf("a gated tool with no one allowed to decide is a configuration error: %v", err)
 	}
 	if _, err := OpenGateway(ctx, nil); !errors.Is(err, ErrConfig) {
 		t.Fatalf("no log: %v", err)

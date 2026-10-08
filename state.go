@@ -42,8 +42,11 @@ type State struct {
 	Approvals map[string]string
 	ByKey     map[string]string
 	Waiting   *Waiting // set while awaiting_approval
-	Denials   int      // refused approval attempts (approval_denied), for audit
-	StartedBy string   // who started the run (Runner.StartedBy), for separation of duties
+	// Requests are a proxy run's approvals still waiting, by operation key. A proxy run doesn't pause for an
+	// approval: the call is answered "pending" and the run stays open; the decision is addressed by key.
+	Requests  map[string]Waiting
+	Denials   int    // refused approval attempts (approval_denied), for audit
+	StartedBy string // who started the run (Runner.StartedBy), for separation of duties
 
 	// Effects indexes every completed idempotent call by key: the log IS the idempotency store for
 	// outcomes it has seen. (Outcomes it never saw, after a crash mid-call, are the tool's job: it gets the key.)
@@ -64,7 +67,7 @@ type Outcome struct {
 // NewState is the state of a run with no events.
 func NewState() State {
 	return State{Status: StatusNew, Started: map[string]bool{}, Effects: map[string]Outcome{},
-		Approvals: map[string]string{}, ByKey: map[string]string{}}
+		Approvals: map[string]string{}, ByKey: map[string]string{}, Requests: map[string]Waiting{}}
 }
 
 // Rebuild folds a log into a State, checking every transition. A log that breaks the rules is an error,
@@ -103,6 +106,8 @@ func Rebuild(events []Event) (State, error) {
 //	new            --run_started (proxy)-->         open
 //	open           --call_received-->               executing       (one call, from outside)
 //	executing      --tool_result | tool_refused-->  open
+//	executing      --approval_requested-->          open            (the call is answered "pending"; the key waits)
+//	open           --approval_decided | _denied-->  open            (addressed by key: the operation, not a call)
 //
 // Not allowed, by design:
 //   - run_finished while executing: every proposed call must have an outcome first (week 1 F14)
@@ -114,7 +119,8 @@ func Rebuild(events []Event) (State, error) {
 //   - tool_refused for a call that was already started (it may have run: that needs a tool_result)
 //   - approval_requested for an operation already rejected in this run (a rejection can't be undone by asking again)
 //   - model decisions, budgets or a final answer in a proxy run; call_received in an agent run
-//   - approvals in a proxy run, until they're designed for one (a call waiting must not stop the others)
+//   - in a proxy run: a second request for a key already requested or decided, a decision for a key that
+//     isn't waiting, or a decision while a call is in progress
 func (s *State) Apply(e Event) error {
 	if e.Sealed != "" {
 		return fmt.Errorf("%w (event %d)", ErrSealed, e.Seq)
@@ -286,11 +292,11 @@ func (s *State) approvalRequested(e Event) error {
 	if e.Key == "" {
 		return fmt.Errorf("approval_requested without an operation key")
 	}
-	if s.Kind == KindProxy {
-		return fmt.Errorf("approval_requested in a proxy run: not supported yet")
-	}
 	if s.ByKey[e.Key] == "rejected" {
 		return fmt.Errorf("approval_requested for operation %s, which was already rejected in this run", e.Key)
+	}
+	if s.Kind == KindProxy {
+		return s.proxyRequest(e)
 	}
 	s.Approvals[e.CallID], s.ByKey[e.Key] = "requested", "requested"
 	s.Waiting = &Waiting{CallID: e.CallID, Key: e.Key, Tool: e.Tool, Summary: e.Summary}
@@ -300,6 +306,9 @@ func (s *State) approvalRequested(e Event) error {
 
 // approvalDecided applies approval_decided: the decision on the call the run is waiting on.
 func (s *State) approvalDecided(e Event) error {
+	if s.Kind == KindProxy {
+		return s.proxyDecision(e)
+	}
 	if s.Status != StatusAwaitingApproval {
 		return fmt.Errorf("approval_decided in status %s", s.Status)
 	}
@@ -316,6 +325,13 @@ func (s *State) approvalDecided(e Event) error {
 
 // approvalDenied applies approval_denied: a refused attempt to decide; the run keeps waiting.
 func (s *State) approvalDenied(e Event) error {
+	if s.Kind == KindProxy {
+		if err := s.proxyWaiting(e); err != nil {
+			return err
+		}
+		s.Denials++
+		return nil
+	}
 	if s.Status != StatusAwaitingApproval || s.Waiting == nil || e.CallID != s.Waiting.CallID || e.Key != s.Waiting.Key {
 		return fmt.Errorf("approval_denied for %q/%q, but the run isn't waiting on it", e.CallID, e.Key)
 	}
@@ -373,6 +389,47 @@ func (s *State) callReceived(e Event) error {
 	}
 	s.Pending = []ToolCall{{ID: e.CallID, Type: "function", Function: FunctionCall{Name: e.Tool, Arguments: e.Args}}}
 	s.Status = StatusExecuting
+	return nil
+}
+
+// proxyRequest applies approval_requested in a proxy run: the operation waits for a decision under its key,
+// and the call that asked is answered (pending) at once, so the run stays open for other calls.
+func (s *State) proxyRequest(e Event) error {
+	if d := s.ByKey[e.Key]; d != "" {
+		return fmt.Errorf("approval_requested for operation %s, which is already %s", e.Key, d)
+	}
+	s.Approvals[e.CallID], s.ByKey[e.Key] = "requested", "requested"
+	s.Requests[e.Key] = Waiting{CallID: e.CallID, Key: e.Key, Tool: e.Tool, Summary: e.Summary}
+	s.removePending(e.CallID)
+	s.Status = StatusOpen
+	return nil
+}
+
+// proxyDecision applies approval_decided in a proxy run: by key, for an operation that's waiting.
+func (s *State) proxyDecision(e Event) error {
+	if err := s.proxyWaiting(e); err != nil {
+		return err
+	}
+	if e.Decision != "approved" && e.Decision != "rejected" {
+		return fmt.Errorf("approval_decided needs decision approved|rejected")
+	}
+	s.ByKey[e.Key] = e.Decision
+	delete(s.Requests, e.Key)
+	return nil
+}
+
+// proxyWaiting checks that a decision (or a refused attempt) in a proxy run is for a waiting operation,
+// between calls, from someone.
+func (s *State) proxyWaiting(e Event) error {
+	w, ok := s.Requests[e.Key]
+	switch {
+	case s.Status != StatusOpen:
+		return fmt.Errorf("%s while a call is in progress (status %s)", e.Type, s.Status)
+	case !ok || e.CallID != w.CallID:
+		return fmt.Errorf("%s for %q/%q, which isn't waiting for a decision", e.Type, e.CallID, e.Key)
+	case e.By == "":
+		return fmt.Errorf("%s needs who (by)", e.Type)
+	}
 	return nil
 }
 

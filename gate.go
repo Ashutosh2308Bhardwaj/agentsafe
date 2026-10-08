@@ -53,7 +53,7 @@ func (r *Runner) decide(ctx context.Context, key, decision, by, reason string) (
 	if st.Status != StatusAwaitingApproval || st.Waiting == nil || st.Waiting.Key != key {
 		return st, fmt.Errorf("%w: %s (status %s)", ErrNotWaiting, key, st.Status)
 	}
-	if err := r.authorize(ctx, &st, decision, by, reason); err != nil {
+	if err := r.authorize(ctx, &st, *st.Waiting, decision, by, reason); err != nil {
 		return st, err
 	}
 	if err := r.emit(ctx, &st, Event{Type: EvApprovalDecided, CallID: st.Waiting.CallID, Key: key,
@@ -79,6 +79,9 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 	g, gated := tool.(Gated)
 	if !gated || !g.NeedsApproval(args) {
 		return true, nil
+	}
+	if st.Kind == KindProxy {
+		return r.proxyGate(ctx, st, g, c, key)
 	}
 	switch st.Approvals[c.ID] {
 	case "approved":
@@ -110,4 +113,41 @@ func (r *Runner) gate(ctx context.Context, st *State, tool Tool, c ToolCall, key
 	r.logf("[awaiting approval] %s %s\n    key=%s  →  Approve or Reject by key", c.Function.Name, r.show(string(b)), key)
 	r.hook("approval_requested")
 	return false, nil
+}
+
+// proxyGate is the approval gate in a proxy run, where the run never pauses: the decision belongs to the
+// operation's key, and each call for it is answered by where that decision stands.
+func (r *Runner) proxyGate(ctx context.Context, st *State, g Gated, c ToolCall, key string) (bool, error) {
+	if key == "" {
+		return false, fmt.Errorf("%w: gated tool %s must be an IdempotentTool: approvals are addressed by operation key", ErrConfig, c.Function.Name)
+	}
+	refuse := func(result string) (bool, error) {
+		return false, r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: result, Key: key})
+	}
+	switch st.ByKey[key] {
+	case "approved":
+		return true, nil
+	case "rejected":
+		return refuse(errorJSON(fmt.Errorf("operation %s was rejected by a human approver; nothing was done. Don't propose it again", key)))
+	case "requested":
+		return refuse(pendingJSON(c.Function.Name, key))
+	}
+	sum, err := g.Summary(json.RawMessage(c.Function.Arguments))
+	if err != nil {
+		return false, err
+	}
+	b, _ := json.Marshal(sum)
+	if err := r.emit(ctx, st, Event{Type: EvApprovalRequested, CallID: c.ID, Tool: c.Function.Name, Key: key, Summary: string(b)}); err != nil {
+		return false, err
+	}
+	r.logf("[awaiting approval] %s %s\n    key=%s  →  approve or reject by key; the run carries on", c.Function.Name, r.show(string(b)), key)
+	r.hook("approval_requested")
+	return false, nil
+}
+
+// pendingJSON is what a call is told while its operation waits for a decision.
+func pendingJSON(tool, key string) string {
+	b, _ := json.Marshal(map[string]string{"status": "pending_approval", "key": key,
+		"message": "Waiting for a human to approve " + tool + ". Nothing was done yet. Call it again with the same arguments later to get the outcome."})
+	return string(b)
 }

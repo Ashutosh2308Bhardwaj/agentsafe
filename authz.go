@@ -79,23 +79,23 @@ func All(authorizers ...Authorizer) Authorizer {
 }
 
 // authorize checks one decision. A refusal is recorded as approval_denied (an audit fact) before returning.
-func (r *Runner) authorize(ctx context.Context, st *State, decision, by, reason string) error {
+func (r *Runner) authorize(ctx context.Context, st *State, w Waiting, decision, by, reason string) error {
 	if r.Authorizer == nil {
 		if r.AnyApprover {
 			return nil
 		}
 		return ErrNoAuthorizer
 	}
-	a := Approval{By: by, Decision: decision, Reason: reason, Tool: st.Waiting.Tool, Key: st.Waiting.Key,
-		Summary: json.RawMessage(st.Waiting.Summary), RunStartedBy: st.StartedBy}
+	a := Approval{By: by, Decision: decision, Reason: reason, Tool: w.Tool, Key: w.Key,
+		Summary: json.RawMessage(w.Summary), RunStartedBy: st.StartedBy}
 	err := r.Authorizer.Authorize(ctx, a)
 	if err == nil {
 		return nil
 	}
-	if lerr := r.emit(ctx, st, Event{Type: EvApprovalDenied, CallID: st.Waiting.CallID, Key: st.Waiting.Key,
+	if lerr := r.emit(ctx, st, Event{Type: EvApprovalDenied, CallID: w.CallID, Key: w.Key,
 		Decision: decision, By: by, Reason: err.Error()}); lerr != nil {
 		return fmt.Errorf("recording a refused approval: %w (refusal: %w)", lerr, err)
 	}
-	r.logf("[%s: %s by %s DENIED: %s]", st.Waiting.Key, decision, by, r.show(err.Error()))
+	r.logf("[%s: %s by %s DENIED: %s]", w.Key, decision, by, r.show(err.Error()))
 	return fmt.Errorf("%w: %w", ErrNotAuthorized, err)
 }

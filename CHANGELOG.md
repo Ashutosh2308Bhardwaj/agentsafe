@@ -15,7 +15,13 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   Runner's guarantees: logged before they run, a repeated operation answered from the log, conflicts, keys.
   It holds the log's lease while open, and on open settles a call a crash left unfinished: refused if it was
   never forwarded, retried with its key if the tool takes one, otherwise recorded as an unknown outcome and
-  never run again. Approvals through a Gateway come later; a gated tool is refused at `OpenGateway`.
+  never run again.
+- **Approvals through a Gateway.** A gated call is answered at once with `pending_approval` and its key, and the run
+  stays open: other calls go on. `Gateway.Approve` / `Reject` decide by key (through the `Authorizer`, with
+  maker-checker against `WithStartedBy`), and `Pending` lists what waits. The next call for the operation runs if
+  approved (once; new values are a conflict), is refused if rejected, and is answered pending until then.
+- The Gateway takes the log's lease per call, not for its lifetime: a decision can be written from another process,
+  and gateways in several processes can share one log.
 - `KeyHonouring`: an `IdempotentTool` can report that the system it calls can't deduplicate on its key. The log
   still answers an operation it saw finish, but an unknown outcome is never retried: it's recorded as "outcome
   unknown" under the key, so the operation asked for again gets that answer, never a second attempt. Applies

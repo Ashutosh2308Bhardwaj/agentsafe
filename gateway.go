@@ -5,37 +5,39 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 )
 
 // Gateway handles tool calls that arrive from outside an agent loop: an MCP proxy forwarding a client's calls,
 // a sidecar in front of an API. Each call gets what a Runner gives a model's call: it's logged before it runs
 // (write-ahead), a repeated operation is answered from the log instead of running again, the same operation
-// with different values is a conflict, and an IdempotentTool gets its key. The log holds a proxy run (format
-// v5) that stays open, call after call.
+// with different values is a conflict, an IdempotentTool gets its key, and a Gated tool waits for a human.
+// The log holds a proxy run (format v5) that stays open, call after call.
 //
-// A Gateway holds its log's lease from OpenGateway to Close: one Gateway per log, in one process. Calls are
-// handled one at a time, so after a crash at most one call is in doubt. OpenGateway settles it.
+// Every Call, Approve, Reject and Pending takes the log's lease, reads the run, settles a call a crash left
+// unfinished, acts, and releases: so a decision can come from another process (a person approving from the
+// command line), and gateways in several processes can share one log, their calls taking turns.
 type Gateway struct {
-	mu      sync.Mutex
-	r       *Runner
-	st      State
-	release func()
+	mu     sync.Mutex
+	r      *Runner
+	closed bool
 }
 
 // GatewayResult is what became of a call.
 type GatewayResult struct {
 	Result   string // the tool's result as JSON, or {"error": ...} when it failed, was refused or is in doubt
 	Replayed bool   // answered from the log: the operation had already happened, and nothing ran
-	Refused  bool   // never attempted (refused before it ran)
+	Refused  bool   // never attempted (refused before it ran, or waiting for approval)
+	Pending  bool   // waiting for a human decision: call again with the same arguments for the outcome
 }
 
-// ErrGatewayClosed is returned by Call after Close.
+// ErrGatewayClosed is returned after Close.
 var ErrGatewayClosed = errors.New("agentsafe: gateway is closed")
 
-// OpenGateway takes the log's lease, starts a proxy run if the log is empty, and settles any call a crash
-// left unfinished. Options are the Runner's: WithTools, WithScope, WithStartedBy, WithToolTimeout, WithHook,
-// WithLogf, WithRedactor, WithoutLease. A model and approvals don't apply (approvals: not yet).
+// OpenGateway checks the configuration, starts a proxy run if the log is empty, and settles any call a crash
+// left unfinished. Options are the Runner's: WithTools, WithScope, WithStartedBy, WithAuthorizer (or
+// WithAnyApprover), WithToolTimeout, WithHook, WithLogf, WithRedactor, WithoutLease. A model doesn't apply.
 func OpenGateway(ctx context.Context, log Log, opts ...Option) (*Gateway, error) {
 	r := &Runner{Model: noModel{}, Log: log}
 	for _, o := range opts {
@@ -44,97 +46,159 @@ func OpenGateway(ctx context.Context, log Log, opts ...Option) (*Gateway, error)
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	for _, t := range r.Tools {
-		if _, gated := t.(Gated); gated {
-			return nil, fmt.Errorf("%w: %s needs approval, and approvals through a Gateway aren't supported yet", ErrConfig, t.Spec().Name)
-		}
-	}
-	release, err := r.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	g := &Gateway{r: r, release: release}
-	if err := g.open(ctx); err != nil {
-		release()
+	g := &Gateway{r: r}
+	if err := g.locked(ctx, func(*State) error { return nil }); err != nil {
 		return nil, err
 	}
 	return g, nil
 }
 
-func (g *Gateway) open(ctx context.Context) error {
+// locked takes the lease, reads the run (starting a proxy run on an empty log), settles a call a crash left
+// unfinished, and runs f on the state. Calls in this process take turns; other processes, through the lease.
+func (g *Gateway) locked(ctx context.Context, f func(*State) error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return ErrGatewayClosed
+	}
+	release, err := g.r.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	st, err := g.r.rebuild(ctx)
 	switch {
 	case errors.Is(err, ErrNoRun):
-		g.st = st
-		return g.r.emit(ctx, &g.st, Event{Type: EvRunStarted, Kind: KindProxy, KeyBits: KeyBits, By: g.r.StartedBy})
-	case err != nil:
-		return err
-	case st.Kind != KindProxy:
-		return fmt.Errorf("%w: the log holds an agent run, not a proxy run", ErrConfig)
+		err = g.r.emit(ctx, &st, Event{Type: EvRunStarted, Kind: KindProxy, KeyBits: KeyBits, By: g.r.StartedBy})
+	case err == nil && st.Kind != KindProxy:
+		err = fmt.Errorf("%w: the log holds an agent run, not a proxy run", ErrConfig)
 	}
-	g.st = st
-	return g.settle(ctx)
+	if err != nil {
+		return err
+	}
+	if err := g.settle(ctx, &st); err != nil {
+		return fmt.Errorf("settling the call a crash left unfinished: %w", err)
+	}
+	return f(&st)
 }
 
-// settle resolves a call a crash left unfinished, before any new call is taken:
+// settle resolves a call a crash left unfinished, before anything else happens:
 //   - never forwarded (no tool_started): refused; nothing was done;
-//   - forwarded, an IdempotentTool with a key: retried with the same key, which the tool must honour;
+//   - forwarded, an IdempotentTool with a key: retried with the same key, unless its downstream can't
+//     deduplicate (KeyHonouring), in which case it's recorded as unknown under the key;
 //   - forwarded, no key: recorded as an unknown outcome. It may have happened, so it's never run again.
-func (g *Gateway) settle(ctx context.Context) error {
-	if g.st.Status != StatusExecuting {
+func (g *Gateway) settle(ctx context.Context, st *State) error {
+	if st.Status != StatusExecuting {
 		return nil
 	}
-	c := g.st.Pending[0]
-	if !g.st.Started[c.ID] {
+	c := st.Pending[0]
+	if !st.Started[c.ID] {
 		res := errorJSON(errors.New("the gateway stopped before this call was forwarded; nothing was done"))
-		return g.r.emit(ctx, &g.st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res})
+		return g.r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res})
 	}
-	if it, ok := g.r.find(c.Function.Name).(IdempotentTool); ok && json.Valid([]byte(c.Function.Arguments)) {
-		if _, _, err := keyFor(g.r.scope(), it, json.RawMessage(c.Function.Arguments), g.st.KeyBits); err == nil {
-			return g.r.step(ctx, &g.st, c) // the same key goes back to the tool
-		}
+	if key, _ := g.r.operation(g.r.find(c.Function.Name), c, st.KeyBits); key != "" {
+		return g.r.step(ctx, st, c) // the same key goes back to the tool (or the unknown is recorded under it)
 	}
 	res := errorJSON(fmt.Errorf("%w: the gateway stopped while %s was running, and it has no idempotency key to "+
 		"retry with. Check before doing it again", ErrOutcomeUnknown, c.Function.Name))
 	g.r.logf("    ? %s (%s): outcome unknown after a restart; recorded, not retried", c.Function.Name, c.ID)
-	return g.r.emit(ctx, &g.st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: res})
+	return g.r.emit(ctx, st, Event{Type: EvToolResult, CallID: c.ID, Tool: c.Function.Name, Result: res})
 }
 
 // Call handles one call. client is who sent it, as the client reports itself: recorded for audit, not trusted.
 // An error means the call's outcome is unknown, or the log couldn't be written: nothing more can be said
 // about it, and the next Call (or a restart) settles it first.
 func (g *Gateway) Call(ctx context.Context, client, tool string, args json.RawMessage) (GatewayResult, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.release == nil {
-		return GatewayResult{}, ErrGatewayClosed
+	var out GatewayResult
+	err := g.locked(ctx, func(st *State) error {
+		c := ToolCall{ID: fmt.Sprintf("call-%d", st.Events+1), Type: "function", Function: FunctionCall{Name: tool, Arguments: string(args)}}
+		if err := g.r.emit(ctx, st, Event{Type: EvCallReceived, CallID: c.ID, Tool: tool, Args: string(args), Client: client}); err != nil {
+			return err
+		}
+		g.r.hook("call_received")
+		if err := g.r.step(ctx, st, c); err != nil {
+			return err
+		}
+		out = resultOf(g.r.last, st)
+		return nil
+	})
+	return out, err
+}
+
+// resultOf is what a call's last event says became of it.
+func resultOf(e Event, st *State) GatewayResult {
+	switch e.Type {
+	case EvApprovalRequested:
+		return GatewayResult{Result: pendingJSON(e.Tool, e.Key), Refused: true, Pending: true}
+	case EvToolRefused:
+		return GatewayResult{Result: e.Result, Refused: true, Pending: e.Key != "" && st.ByKey[e.Key] == "requested"}
+	default:
+		return GatewayResult{Result: e.Result, Replayed: e.Replayed}
 	}
-	if err := g.settle(ctx); err != nil {
-		return GatewayResult{}, fmt.Errorf("settling the previous call first: %w", err)
-	}
-	c := ToolCall{ID: fmt.Sprintf("call-%d", g.st.Events+1), Type: "function", Function: FunctionCall{Name: tool, Arguments: string(args)}}
-	if err := g.r.emit(ctx, &g.st, Event{Type: EvCallReceived, CallID: c.ID, Tool: tool, Args: string(args), Client: client}); err != nil {
-		return GatewayResult{}, err
-	}
-	g.r.hook("call_received")
-	if err := g.r.step(ctx, &g.st, c); err != nil {
-		return GatewayResult{}, err
-	}
-	e := g.r.last
-	return GatewayResult{Result: e.Result, Replayed: e.Replayed, Refused: e.Type == EvToolRefused}, nil
+}
+
+// Approve records an approval for the operation key, by an identity your system verified, if the Authorizer
+// allows it (a refused attempt is logged too). The operation runs when it's next called. Approving an
+// approved operation again changes nothing.
+func (g *Gateway) Approve(ctx context.Context, key, by string) error {
+	return g.decide(ctx, key, "approved", by, "")
+}
+
+// Reject records a rejection: the operation is refused whenever it's called again.
+func (g *Gateway) Reject(ctx context.Context, key, by, reason string) error {
+	return g.decide(ctx, key, "rejected", by, reason)
+}
+
+func (g *Gateway) decide(ctx context.Context, key, decision, by, reason string) error {
+	return g.locked(ctx, func(st *State) error {
+		switch prev := st.ByKey[key]; {
+		case prev == decision:
+			return nil // the same decision twice changes nothing
+		case prev == "":
+			return fmt.Errorf("%w: no approval was requested for %s", ErrNotWaiting, key)
+		case prev != "requested":
+			return fmt.Errorf("%w: %s was already %s", ErrAlreadyDecided, key, prev)
+		}
+		w := st.Requests[key]
+		if err := g.r.authorize(ctx, st, w, decision, by, reason); err != nil {
+			return err
+		}
+		if err := g.r.emit(ctx, st, Event{Type: EvApprovalDecided, CallID: w.CallID, Key: key, Decision: decision, By: by, Reason: reason}); err != nil {
+			return err
+		}
+		g.r.logf("[%s %s by %s]", key, decision, by)
+		return nil
+	})
+}
+
+// Pending lists the operations waiting for a decision, oldest first: what an approver is shown.
+func (g *Gateway) Pending(ctx context.Context) ([]Waiting, error) {
+	var out []Waiting
+	err := g.locked(ctx, func(st *State) error {
+		for _, w := range st.Requests {
+			out = append(out, w)
+		}
+		sort.Slice(out, func(i, j int) bool { return callNumber(out[i].CallID) < callNumber(out[j].CallID) })
+		return nil
+	})
+	return out, err
+}
+
+func callNumber(id string) int {
+	var n int
+	_, _ = fmt.Sscanf(id, "call-%d", &n)
+	return n
 }
 
 // Tools are the tools the gateway serves.
 func (g *Gateway) Tools() []ToolSpec { return g.r.specs() }
 
-// Close releases the log's lease. Calls in flight finish first.
+// Close stops the gateway: calls after it are refused. It holds no lease between calls, so there's nothing
+// else to release.
 func (g *Gateway) Close() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.release != nil {
-		g.release()
-		g.release = nil
-	}
+	g.closed = true
 	return nil
 }
 

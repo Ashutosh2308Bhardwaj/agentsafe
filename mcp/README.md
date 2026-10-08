@@ -30,7 +30,7 @@ agentsafe first. The agent's code and the server don't change.
 - **A crash mid-call is settled, never repeated.** A call the proxy hadn't forwarded is recorded as refused
   (nothing was done); a call it had forwarded is recorded as an unknown outcome and **not** retried, because
   MCP has no idempotency key and the upstream can't deduplicate.
-- One proxy per log, enforced by the log's lease.
+- The log's lease is taken per call: proxies in several processes can share one log, their calls taking turns.
 
 With a policy for a tool:
 
