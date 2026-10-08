@@ -15,12 +15,15 @@ import (
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/mcptest"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/tooltest"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// verify checks that the upstream really deduplicates on the key its policy sends: one call with a new key makes
-// one effect, and 20 at once with one key still make one, with one answer for everyone (mcptest.CheckSameKey).
-// The effects are counted by --count, a shell command that prints a number. It makes real calls with real
-// effects, so it refuses to run without --sandbox.
+// verify checks a tool against a sandbox of its server, as its policy uses it. Every tool: one call makes exactly
+// one effect (mcptest.CheckOneEffect); two means the server repeats it inside one call, which no proxy can stop.
+// A policy that sends a key: the server really deduplicates on it, one call after another and 20 at once
+// (mcptest.CheckSameKey). Without a key the tool isn't retry-safe, which verify reports: after a crash agentsafe
+// records the outcome as unknown and never retries it. Effects are counted by --count, a shell command that
+// prints a number. It makes real calls with real effects, so it refuses to run without --sandbox.
 func verify(args []string) error {
 	v, err := parseVerify(args)
 	if err != nil {
@@ -49,21 +52,80 @@ func verify(args []string) error {
 		}
 		return n
 	}
-	err = mcptest.CheckSameKey(ctx, upstream, v.tool, policy, json.RawMessage(v.args), effects)
+	if policy.Key != mcp.KeyNone && !policy.Pass {
+		// The policy is checked against the tool before any call: a wrong one mustn't cost a real effect.
+		if _, err := mcp.KeyedTool(ctx, upstream, v.tool, policy); err != nil {
+			return err
+		}
+	}
+	r := check(ctx, upstream, v, policy, effects)
 	if countErr != nil {
 		return fmt.Errorf("counting effects: %w", countErr)
 	}
-	if err != nil {
-		return fmt.Errorf("FAIL: %w", err)
+	return report(r, v.json)
+}
+
+// verdict is what verify found, also printed as JSON (--json) for collecting across servers.
+type verdict struct {
+	Tool      string `json:"tool"`
+	Key       string `json:"key"`        // the policy's key mode: none, meta, argument (pass: "pass")
+	OneEffect string `json:"one_effect"` // pass, fail
+	SameKey   string `json:"same_key"`   // pass, fail, skipped (no key, or one effect failed)
+	RetrySafe bool   `json:"retry_safe"` // an unknown outcome can be retried: one effect and the key holds
+	Detail    string `json:"detail,omitempty"`
+}
+
+func check(ctx context.Context, upstream *sdk.ClientSession, v verifyArgs, policy mcp.Policy, effects func() int) verdict {
+	r := verdict{Tool: v.tool, Key: string(policy.Key), OneEffect: "pass", SameKey: "skipped"}
+	if policy.Pass {
+		r.Key = "pass"
 	}
-	fmt.Printf("PASS: %s deduplicates on its key (key: %s): one call with a new key made one effect, and %d "+
-		"simultaneous calls with one key made one, with one answer.\n", v.tool, policy.Key, tooltest.Concurrency)
+	if err := mcptest.CheckOneEffect(ctx, upstream, v.tool, json.RawMessage(v.args), effects); err != nil {
+		r.OneEffect, r.Detail = "fail", err.Error()
+		return r
+	}
+	if policy.Pass || policy.Key == mcp.KeyNone {
+		r.Detail = "no key: after a crash or timeout agentsafe records the outcome as unknown and never retries it"
+		return r
+	}
+	if err := mcptest.CheckSameKey(ctx, upstream, v.tool, policy, json.RawMessage(v.args), effects); err != nil {
+		r.SameKey, r.Detail = "fail", err.Error()
+		return r
+	}
+	r.SameKey, r.RetrySafe = "pass", true
+	return r
+}
+
+// report prints the verdict; an error (a non-zero exit) when a check failed.
+func report(r verdict, asJSON bool) error {
+	failed := r.OneEffect == "fail" || r.SameKey == "fail"
+	if asJSON {
+		out, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(out))
+	} else {
+		switch {
+		case failed:
+			fmt.Println("FAIL:", r.Detail)
+		case r.RetrySafe:
+			fmt.Printf("PASS: %s makes one effect per call and deduplicates on its key (key: %s): %d simultaneous "+
+				"calls with one key made one, with one answer. Safe to retry.\n", r.Tool, r.Key, tooltest.Concurrency)
+		default:
+			fmt.Printf("PASS: %s makes one effect per call. Not retry-safe (key: %s): %s.\n", r.Tool, r.Key, r.Detail)
+		}
+	}
+	if failed {
+		return errors.New("verify failed")
+	}
 	return nil
 }
 
 // verifyArgs are verify's flags, checked.
 type verifyArgs struct {
 	policy, tool, args, count string
+	json                      bool
 	upstream                  []string
 }
 
@@ -74,9 +136,10 @@ func parseVerify(args []string) (verifyArgs, error) {
 	fs.StringVar(&v.tool, "tool", "", "the tool to check (required)")
 	fs.StringVar(&v.args, "args", "", "arguments of one operation, as JSON (required)")
 	fs.StringVar(&v.count, "count", "", "shell command printing how many effects exist so far, e.g. a SELECT count(*) (required)")
+	fs.BoolVar(&v.json, "json", false, "print the verdict as JSON")
 	sandbox := fs.Bool("sandbox", false, "confirm the server is a sandbox: verify makes real calls, with real effects")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox -- COMMAND [ARGS...]")
+		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox [--json] -- COMMAND [ARGS...]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -88,7 +151,7 @@ func parseVerify(args []string) (verifyArgs, error) {
 		fs.Usage()
 		return v, errors.New("--policy, --tool, --args, --count and the upstream command are required")
 	case !*sandbox:
-		return v, errors.New("verify calls the tool at least twice, for real: run it against a sandbox of the server, and say so with --sandbox")
+		return v, errors.New("verify calls the tool for real: run it against a sandbox of the server, and say so with --sandbox")
 	case !json.Valid([]byte(v.args)):
 		return v, errors.New("--args isn't JSON")
 	}

@@ -98,6 +98,16 @@ func main() {
 			b.Charges++
 			return reply(fmt.Sprintf("charged (charge %d)", b.Charges)), save(b)
 		})
+	s.AddTool(&sdk.Tool{Name: "charge_twice", Description: "Bill the customer; a bug books every charge twice",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"ticket_id": map[string]any{"type": "string"},
+			"amount": map[string]any{"type": "string"}}}},
+		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			b := load()
+			b.Charges += 2
+			return reply(fmt.Sprintf("charged (charge %d)", b.Charges)), save(b)
+		})
 	if err := s.Run(context.Background(), &sdk.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "fakeupstream:", err)
 		os.Exit(1)

@@ -13,8 +13,9 @@
 //	agentsafe-mcp approve --log calls.jsonl --policy policy.json KEY
 //	agentsafe-mcp reject  --log calls.jsonl --policy policy.json --reason "duplicate ticket" KEY
 //
-// A policy with key "meta" or "argument" claims the server deduplicates on the key. Check the claim against a
-// sandbox of the server (it makes real calls, so it refuses to run without --sandbox):
+// Check a tool against a sandbox of its server: one call makes exactly one effect, and, for a policy with key "meta"
+// or "argument" (a claim that the server deduplicates on the key), the key holds. It makes real calls, so it
+// refuses to run without --sandbox; --json prints the verdict:
 //
 //	agentsafe-mcp verify --policy policy.json --tool charge --args '{"ticket_id":"VERIFY-1","amount":"0.01"}' \
 //	    --count 'sqlite3 sandbox.db "select count(*) from charges"' --sandbox -- npx -y @acme/billing-mcp

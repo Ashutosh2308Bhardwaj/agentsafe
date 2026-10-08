@@ -63,8 +63,10 @@ With a policy for a tool:
   `TestKilledAfterTheUpstreamChargedThenRestarted` kills the proxy right after the server charged: one
   charge in every mode, two without a policy.
 - **`key: meta` or `argument` is your claim that the server deduplicates on the key**: agentsafe-mcp can't know. Check
-  it against a **sandbox** of the server, calling the tool the way the proxy does: one call with a new key (one
-  effect), then 20 at once with one key (still one effect, one answer).
+  it against a **sandbox** of the server, calling the tool the way the proxy does. Every tool, keyed or not: one call
+  makes exactly one effect (two means the server repeats the action inside one call, which no proxy can stop). With a
+  key: one call with a new key (one effect), then 20 at once with one key (still one effect, one answer). Without a
+  key, verify reports the tool as not retry-safe: after a crash its outcome is recorded as unknown, never retried.
 
   ```bash
   agentsafe-mcp verify --policy policy.json --tool charge --args '{"ticket_id":"VERIFY-1","amount":"0.01"}' \
@@ -72,7 +74,7 @@ With a policy for a tool:
   ```
 
   `--count` is any shell command printing how many effects exist (a `count(*)`, `curl … | jq length`). It makes real
-  calls, so it won't run without `--sandbox`. From Go: `mcptest.SameKey`. It catches a server that ignores the key,
+  calls, so it won't run without `--sandbox`; `--json` prints the verdict. From Go: `mcptest.OneEffect`, `mcptest.SameKey`. It catches a server that ignores the key,
   and one that checks and then acts without a lock **when there's a real gap between the two** (a database read, then
   a payment API call): a race only microseconds wide can pass. A pass is strong evidence, not proof.
 - A call missing an identity field is refused before it's forwarded. Policies are checked against the

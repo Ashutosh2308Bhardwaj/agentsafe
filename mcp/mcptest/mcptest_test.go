@@ -64,6 +64,18 @@ func (b *billing) server() *sdk.Server {
 		}
 		return ok(), nil
 	})
+	s.AddTool(&sdk.Tool{Name: "charge_twice", InputSchema: schema}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		b.charges += 2 // a bug inside the server: one call, two effects
+		return ok(), nil
+	})
+	s.AddTool(&sdk.Tool{Name: "charge_nothing", InputSchema: schema}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return ok(), nil
+	})
+	s.AddTool(&sdk.Tool{Name: "charge_fails", InputSchema: schema}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "card declined"}}}, nil
+	})
 	return s
 }
 
@@ -117,6 +129,29 @@ func TestOnlyAKeyTheServerReceivesCanBeChecked(t *testing.T) {
 		_, err := mcp.KeyedTool(context.Background(), session(t, &billing{done: map[string]bool{}}), "charge", p)
 		if !errors.Is(err, agentsafe.ErrConfig) {
 			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// One call, one effect: for any tool, keyed or not. Two effects (a duplicate inside the server), none, or an
+// error are each caught, and said apart.
+func TestOneCallOneEffect(t *testing.T) {
+	for tool, want := range map[string]string{
+		"charge":             "",
+		"charge_ignores_key": "", // a key isn't involved: one call, one charge
+		"charge_twice":       "one call made 2 effects",
+		"charge_nothing":     "made no effect",
+		"charge_fails":       "card declined",
+	} {
+		b := &billing{done: map[string]bool{}}
+		err := mcptest.CheckOneEffect(context.Background(), session(t, b), tool, json.RawMessage(`{"ticket_id":"T-1"}`),
+			func() int {
+				b.mu.Lock()
+				defer b.mu.Unlock()
+				return b.charges
+			})
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: got %v, want %q", tool, err, want)
 		}
 	}
 }

@@ -6,6 +6,19 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Added (`mcp`)
+
+- `agentsafe-mcp verify` checks every tool that changes something, not only keyed ones: one call must make exactly
+  one effect (`mcptest.OneEffect` / `CheckOneEffect`). Two effects means the server repeats the action inside a single
+  call, which no proxy can stop; none means `--count` counts the wrong thing. A policy without a key is now accepted
+  and reported as *not retry-safe*; with a key, the key checks follow as before.
+- `verify --json` prints the verdict (`one_effect`, `same_key`, `retry_safe`) for collecting across servers.
+
+### Changed (`mcp`)
+
+- `verify` checks a keyed policy against the tool before making any call: a policy that doesn't fit the tool no
+  longer costs a real effect.
+
 ## [mcp/v0.3.0] - 2026-10-08
 
 `agentsafe/mcp` only: the core stays at v0.5.0.

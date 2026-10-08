@@ -206,8 +206,9 @@ func TestApprovingFromTheCommandLine(t *testing.T) {
 	}
 }
 
-// verify against a sandbox: a server that honours its key passes; one that takes the key and ignores it fails;
-// without --sandbox nothing is called; a policy that sends no key can't be checked.
+// verify against a sandbox: a server that honours its key passes and is retry-safe; one that takes the key and
+// ignores it fails; one that charges twice per call fails, key or not; a policy that sends no key is checked for
+// one effect per call and reported as not retry-safe; without --sandbox nothing is called.
 func TestVerifyingThatAServerHonoursItsKey(t *testing.T) {
 	dir := t.TempDir()
 	proxyBin := build(t, dir, "agentsafe-mcp", ".")
@@ -219,10 +220,13 @@ func TestVerifyingThatAServerHonoursItsKey(t *testing.T) {
 		want            string
 		charges         string // what the books hold after
 	}{
-		{"a server that honours its key", "charge", "argument", true, true, "PASS: charge deduplicates on its key", `"charges":2`},
+		{"a server that honours its key", "charge", "argument", true, true, "Safe to retry", `"charges":3`},
 		{"one that takes the key and ignores it", "charge_ignores_key", "argument", true, false, "FAIL", `"charges":`},
 		{"not confirmed as a sandbox", "charge", "argument", false, false, "--sandbox", ``},
-		{"a policy that sends no key", "charge", "none", true, false, "only a policy that sends a key", ``},
+		{"a policy that sends no key", "charge", "none", true, true, "Not retry-safe (key: none)", `"charges":1`},
+		{"two effects per call, no key", "charge_twice", "none", true, false, "one call made 2 effects", `"charges":2`},
+		{"two effects per call, with a key", "charge_twice", "meta", true, false, "one call made 2 effects", `"charges":2`},
+		{"a policy that doesn't fit the tool", "charge_twice", "argument", true, false, "no argument \"idempotency_key\"", ``},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			run := t.TempDir()
@@ -251,5 +255,34 @@ func TestVerifyingThatAServerHonoursItsKey(t *testing.T) {
 				t.Fatalf("books: %s, want %s", raw, c.charges)
 			}
 		})
+	}
+}
+
+// --json: one verdict per run, for collecting across tools and servers.
+func TestVerifyPrintsJSON(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	for tool, want := range map[string]string{
+		"charge":       `{"tool":"charge","key":"argument","one_effect":"pass","same_key":"pass","retry_safe":true}`,
+		"charge_twice": `{"tool":"charge_twice","key":"argument","one_effect":"fail","same_key":"skipped","retry_safe":false,`,
+	} {
+		run := t.TempDir()
+		books, policy := filepath.Join(run, "books.json"), filepath.Join(run, "policy.json")
+		p := fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"],"key":"argument","key_argument":"idempotency_key"}}}`, tool)
+		if tool == "charge_twice" { // it declares no key argument: a meta key, so the policy is accepted
+			p = fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"],"key":"meta"}}}`, tool)
+			want = strings.Replace(want, `"key":"argument"`, `"key":"meta"`, 1)
+		}
+		if err := os.WriteFile(policy, []byte(p), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, _ := exec.Command(proxyBin, "verify", "--json", "--sandbox", "--policy", policy, "--tool", tool,
+			"--args", `{"ticket_id":"VERIFY-1","amount":"0.01"}`, "--count", upstreamBin+" --state "+books+" --print-charges",
+			"--", upstreamBin, "--state", books).Output()
+		var v map[string]any
+		if json.Unmarshal(out, &v) != nil || !strings.HasPrefix(string(out), want) {
+			t.Errorf("%s: got %s, want it to start %s", tool, out, want)
+		}
 	}
 }
