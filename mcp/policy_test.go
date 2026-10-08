@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
@@ -110,4 +111,21 @@ func openWith(t *testing.T, policies map[string]mcp.Policy) (*mcp.Proxy, error) 
 	}
 	t.Cleanup(func() { _ = upstream.Close() })
 	return mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: filepath.Join(t.TempDir(), "p.jsonl")}, policies)
+}
+
+// A policy without identity would make every call the same operation: the tool would work once, then refuse every
+// other call as a conflict. It's refused at startup, whatever else it says.
+func TestAPolicyThatProtectsAToolNeedsAnIdentity(t *testing.T) {
+	for name, p := range map[string]mcp.Policy{
+		"empty":          {},
+		"key: none":      {Key: mcp.KeyNone},
+		"approval never": {Approval: "never"},
+		"a timeout":      {Timeout: mcp.Duration(time.Second)},
+		"a meta key":     {Key: mcp.KeyMeta},
+	} {
+		_, err := openWith(t, passRest(map[string]mcp.Policy{"charge": p}))
+		if !errors.Is(err, agentsafe.ErrConfig) || !strings.Contains(err.Error(), "identity is required") {
+			t.Errorf("%s: must be refused at startup: %v", name, err)
+		}
+	}
 }

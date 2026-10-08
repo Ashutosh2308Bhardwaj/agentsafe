@@ -38,7 +38,7 @@ type Policy struct {
 	// reads and for tools whose effects don't matter; it can't be combined with the fields below.
 	Pass bool `json:"pass"`
 	// Identity names the arguments that make a call one operation: they're hashed into its key. A refund's
-	// might be ticket_id and charge_id. The other arguments are its payload: the same operation with a
+	// might be ticket_id and charge_id. Required unless Pass. The other arguments are its payload: the same operation with a
 	// different payload is a conflict, never a second effect.
 	Identity []string `json:"identity"`
 	// Key is how the key reaches the upstream: none (the default), meta, or argument.
@@ -83,10 +83,15 @@ func (p *Policy) check(t *sdk.Tool) error {
 	return nil
 }
 
-// consistent checks the policy's fields against each other.
+// consistent checks the policy's fields against each other. A policy that protects a tool needs identity: without
+// it every call is the same operation, so the tool would work once and refuse every other call as a conflict.
 func (p *Policy) consistent() error {
-	if p.Pass && (len(p.Identity) > 0 || p.Key != KeyNone || p.KeyArgument != "" || p.Approval == "always") {
+	switch {
+	case p.Pass && (len(p.Identity) > 0 || p.Key != KeyNone || p.KeyArgument != "" || p.Approval == "always"):
 		return errors.New("pass forwards the tool unprotected: it can't have identity, a key or an approval")
+	case !p.Pass && len(p.Identity) == 0:
+		return errors.New("identity is required: the arguments that make a call one operation (a refund's ticket_id). " +
+			"Without them every call would be the same operation. Or \"pass\": true, to forward it unprotected")
 	}
 	if err := p.keyRules(); err != nil {
 		return err
@@ -94,13 +99,11 @@ func (p *Policy) consistent() error {
 	return p.approvalRules()
 }
 
-// keyRules: a key needs identity to be made from, and a way to reach the upstream that's fully specified.
+// keyRules: a key needs a way to reach the upstream that's fully specified.
 func (p *Policy) keyRules() error {
 	switch {
 	case p.Key != KeyNone && p.Key != KeyMeta && p.Key != KeyArgument:
 		return fmt.Errorf("key %q: none, meta or argument", p.Key)
-	case len(p.Identity) == 0 && p.Key != KeyNone:
-		return errors.New("a key needs identity fields to be made from")
 	case p.Key == KeyArgument && p.KeyArgument == "":
 		return errors.New("key: argument needs key_argument, the argument the upstream deduplicates on")
 	case p.Key != KeyArgument && p.KeyArgument != "":
@@ -111,13 +114,10 @@ func (p *Policy) keyRules() error {
 	return nil
 }
 
-// approvalRules: always or never, and approval needs identity: a decision is addressed by the operation's key.
+// approvalRules: always or never.
 func (p *Policy) approvalRules() error {
-	switch {
-	case p.Approval != "" && p.Approval != "always" && p.Approval != "never":
+	if p.Approval != "" && p.Approval != "always" && p.Approval != "never" {
 		return fmt.Errorf("approval %q: always or never", p.Approval)
-	case p.Approval == "always" && len(p.Identity) == 0:
-		return errors.New("approval needs identity fields: a decision is addressed by the operation's key")
 	}
 	return nil
 }

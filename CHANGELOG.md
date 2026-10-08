@@ -14,6 +14,13 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   and reported as *not retry-safe*; with a key, the key checks follow as before.
 - `verify --json` prints the verdict (`one_effect`, `same_key`, `retry_safe`) for collecting across servers.
 
+### Fixed (`mcp`)
+
+- **A policy that protects a tool now requires `identity`**, and one without it is refused at startup. Before, a
+  policy such as `{}`, `{"key": "none"}` or `{"approval": "never"}` made every call to the tool the same operation:
+  the first call ran, and every later one, for any arguments, was refused as a conflict (it failed safe, never
+  twice, but the tool worked once). Give it the arguments that make a call one operation, or `"pass": true`.
+
 ### Changed (`mcp`)
 
 - `verify` checks a keyed policy against the tool before making any call: a policy that doesn't fit the tool no
