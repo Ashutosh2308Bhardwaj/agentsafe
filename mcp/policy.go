@@ -36,24 +36,27 @@ const MetaKeyIdempotency = MetaPrefix + "idempotency-key"
 type Policy struct {
 	// Pass forwards the tool unprotected: logged, but no key and no approval. It's how you say "I know", for
 	// reads and for tools whose effects don't matter; it can't be combined with the fields below.
-	Pass bool `json:"pass"`
+	Pass bool `json:"pass,omitempty"`
 	// Identity names the arguments that make a call one operation: they're hashed into its key. A refund's
 	// might be ticket_id and charge_id. Required unless Pass. The other arguments are its payload: the same operation with a
 	// different payload is a conflict, never a second effect.
-	Identity []string `json:"identity"`
+	Identity []string `json:"identity,omitempty"`
 	// Key is how the key reaches the upstream: none (the default), meta, or argument.
-	Key KeyMode `json:"key"`
+	Key KeyMode `json:"key,omitempty"`
 	// KeyArgument is the argument the upstream deduplicates on, for Key: argument.
-	KeyArgument string `json:"key_argument"`
+	KeyArgument string `json:"key_argument,omitempty"`
 	// Timeout bounds one call; past it the outcome is unknown. 0: the gateway's.
-	Timeout Duration `json:"timeout"`
+	Timeout Duration `json:"timeout,omitempty"`
 	// Approval is "always" (every call waits for a human; it needs identity: a decision is addressed by the
 	// operation's key) or "never" (the default).
-	Approval string `json:"approval"`
+	Approval string `json:"approval,omitempty"`
 }
 
 // Duration is a time.Duration written as text in a policy file ("10s", "2m").
 type Duration time.Duration
+
+// MarshalJSON writes "10s", as UnmarshalJSON reads it.
+func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(time.Duration(d).String()) }
 
 // UnmarshalJSON reads "10s".
 func (d *Duration) UnmarshalJSON(b []byte) error {

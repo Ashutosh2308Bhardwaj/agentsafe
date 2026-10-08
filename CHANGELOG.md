@@ -12,6 +12,11 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   one effect (`mcptest.OneEffect` / `CheckOneEffect`). Two effects means the server repeats the action inside a single
   call, which no proxy can stop; none means `--count` counts the wrong thing. A policy without a key is now accepted
   and reported as *not retry-safe*; with a key, the key checks follow as before.
+- `agentsafe-mcp inspect` (`mcp.Inspect`): lists a server's tools without calling any (read-only, destructive and
+  idempotent hints, an argument that looks like an idempotency key, required arguments) and suggests a starting
+  policy that fails closed. `--policy-out` writes it as a policy file, never over an existing one; `--json` prints
+  the inspection.
+- `Duration` marshals as text ("10s"), and `Policy` omits empty fields: a policy written by Go loads back.
 - `verify --json` prints the verdict (`one_effect`, `same_key`, `retry_safe`) for collecting across servers.
 
 ### Fixed (`mcp`)

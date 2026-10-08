@@ -286,3 +286,42 @@ func TestVerifyPrintsJSON(t *testing.T) {
 		}
 	}
 }
+
+// inspect, as a process: no tool is called (the books stay untouched), the JSON lists every tool, the starting
+// policy is written once and never over an existing file.
+func TestInspectingAServer(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	books, policy := filepath.Join(dir, "books.json"), filepath.Join(dir, "policy.json")
+	out, err := exec.Command(proxyBin, "inspect", "--json", "--policy-out", policy, "--", upstreamBin, "--state", books).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in struct {
+		Server string
+		Tools  []struct {
+			Name        string
+			Write       bool
+			KeyArgument string `json:"key_argument"`
+		}
+	}
+	if err := json.Unmarshal(out, &in); err != nil || in.Server != "billing-mcp" || len(in.Tools) != 4 {
+		t.Fatalf("%v: %s", err, out)
+	}
+	for _, tool := range in.Tools {
+		if tool.Name == "charge" && (!tool.Write || tool.KeyArgument != "idempotency_key") {
+			t.Fatalf("charge: a write with a key argument: %+v", tool)
+		}
+	}
+	if _, err := os.Stat(books); !os.IsNotExist(err) {
+		t.Fatal("inspect must not call any tool")
+	}
+	if raw, err := os.ReadFile(policy); err != nil || !strings.Contains(string(raw), `"approvers"`) {
+		t.Fatalf("the starting policy: %v %s", err, raw)
+	}
+	again, err := exec.Command(proxyBin, "inspect", "--policy-out", policy, "--", upstreamBin, "--state", books).CombinedOutput()
+	if err == nil || !strings.Contains(string(again), "file exists") {
+		t.Fatalf("an existing policy must never be overwritten: %s", again)
+	}
+}

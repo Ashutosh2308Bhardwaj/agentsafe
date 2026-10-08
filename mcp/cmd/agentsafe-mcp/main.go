@@ -13,6 +13,11 @@
 //	agentsafe-mcp approve --log calls.jsonl --policy policy.json KEY
 //	agentsafe-mcp reject  --log calls.jsonl --policy policy.json --reason "duplicate ticket" KEY
 //
+// Start a policy from what a server says about its tools, without calling any (identity is guessed from the
+// required arguments, destructive writes wait for approval; read it before you use it):
+//
+//	agentsafe-mcp inspect --policy-out policy.json -- npx -y @acme/billing-mcp
+//
 // Check a tool against a sandbox of its server: one call makes exactly one effect, and, for a policy with key "meta"
 // or "argument" (a claim that the server deduplicates on the key), the key holds. It makes real calls, so it
 // refuses to run without --sandbox; --json prints the verdict:
@@ -49,6 +54,8 @@ func main() {
 		err = decide(os.Args[1], os.Args[2:])
 	case len(os.Args) > 1 && os.Args[1] == "verify":
 		err = verify(os.Args[2:])
+	case len(os.Args) > 1 && os.Args[1] == "inspect":
+		err = inspect(os.Args[2:])
 	default:
 		err = serve(os.Args[1:])
 	}
@@ -96,6 +103,8 @@ func serve(args []string) error {
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp --log FILE [--policy FILE] [--started-by WHO] [--scope S] -- COMMAND [ARGS...]")
 		fmt.Fprintln(os.Stderr, "       agentsafe-mcp pending|approve|reject --log FILE --policy FILE [KEY]")
+		fmt.Fprintln(os.Stderr, "       agentsafe-mcp inspect [--json] [--policy-out FILE] -- COMMAND [ARGS...]")
+		fmt.Fprintln(os.Stderr, "       agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox -- COMMAND [ARGS...]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

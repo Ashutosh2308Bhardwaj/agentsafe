@@ -27,6 +27,28 @@ which need a human's approval, and who may give it:
 } }
 ```
 
+**Start from what the server says about its tools.** `inspect` lists them without calling any, and writes a
+starting policy that fails closed: read-only tools pass; a write is keyed on its required arguments (and on an
+argument that looks like an idempotency key, if it has one); a write the server doesn't mark non-destructive waits
+for approval; a write with no required arguments gets no policy and stays hidden. The annotations are the server's
+word and identity is a guess: read the file before you use it.
+
+```bash
+agentsafe-mcp inspect --policy-out policy.json -- npx -y @modelcontextprotocol/server-filesystem ./data
+```
+
+```
+secure-filesystem-server 0.2.0: 14 tools, 10 read-only, 4 that change something (0 with a key argument); 14 annotated.
+
+TOOL              KIND                KEY ARGUMENT  SUGGESTED POLICY
+read_file         read                -             pass
+write_file        write, destructive  -             identity content,path; no key (not retry-safe); approval
+create_directory  write               -             identity path; no key (not retry-safe)
+...
+```
+
+`--json` prints the inspection; from Go, `mcp.Inspect`.
+
 ## What it does, and what it doesn't
 
 **A tool proxy, for one upstream MCP server, over stdio.** Only tools are proxied: resources and prompts are not.
@@ -77,7 +99,8 @@ With a policy for a tool:
   calls, so it won't run without `--sandbox`; `--json` prints the verdict. From Go: `mcptest.OneEffect`, `mcptest.SameKey`. It catches a server that ignores the key,
   and one that checks and then acts without a lock **when there's a real gap between the two** (a database read, then
   a payment API call): a race only microseconds wide can pass. A pass is strong evidence, not proof.
-- A call missing an identity field is refused before it's forwarded. Policies are checked against the
+- A policy that protects a tool needs `identity` (or it's `pass`): without it every call would be the same
+  operation. A call missing an identity field is refused before it's forwarded. Policies are checked against the
   server's real tools at startup: a misspelt tool or argument fails loudly instead of leaving a tool bare.
 
 With `approval: always`:
