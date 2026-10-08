@@ -1,10 +1,14 @@
 // Command agentsafe-mcp runs an MCP server behind agentsafe: put it in front of the server's command in your
 // agent's MCP configuration, and every tool call goes through agentsafe's log first.
 //
-//	agentsafe-mcp --log calls.jsonl -- npx -y @acme/billing-mcp
+//	agentsafe-mcp --log calls.jsonl --policy policy.json -- npx -y @acme/billing-mcp
 //
 // It speaks MCP on stdin/stdout to the agent, and starts the upstream server as a child process. Progress and
-// errors go to stderr: stdout is the protocol.
+// errors go to stderr: stdout is the protocol. The policy file says which tools are protected by an
+// idempotency key, and how the key reaches the upstream (mcp.LoadPolicies); without one, every call is
+// passed through and logged.
+//
+// AGENTSAFE_KILL_AT=<point> kills the process at a named point (e.g. after_tool_executed): for crash tests.
 package main
 
 import (
@@ -36,8 +40,9 @@ func run() error {
 	scope := flag.String("scope", "", "idempotency scope: keys are unique within it (default: the log)")
 	startedBy := flag.String("started-by", "", "who runs this agent, recorded in the log")
 	quiet := flag.Bool("quiet", false, "don't report each call on stderr")
+	policyPath := flag.String("policy", "", "policy file: which tools get idempotency keys, and how")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp --log FILE [--scope S] [--started-by WHO] -- COMMAND [ARGS...]")
+		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp --log FILE [--policy FILE] [--scope S] [--started-by WHO] -- COMMAND [ARGS...]")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -57,11 +62,25 @@ func run() error {
 	}
 	defer func() { _ = upstream.Close() }()
 
+	var policies map[string]mcp.Policy
+	if *policyPath != "" {
+		if policies, err = mcp.LoadPolicies(*policyPath); err != nil {
+			return err
+		}
+	}
 	opts := []agentsafe.Option{agentsafe.WithScope(*scope), agentsafe.WithStartedBy(*startedBy)}
+	if at := os.Getenv("AGENTSAFE_KILL_AT"); at != "" {
+		opts = append(opts, agentsafe.WithHook(func(point string) {
+			if point == at {
+				fmt.Fprintln(os.Stderr, "agentsafe-mcp: killed at", point)
+				kill()
+			}
+		}))
+	}
 	if !*quiet {
 		opts = append(opts, agentsafe.WithLogf(func(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) }))
 	}
-	proxy, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: *logPath}, nil, opts...)
+	proxy, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: *logPath}, policies, opts...)
 	if err != nil {
 		return err
 	}
