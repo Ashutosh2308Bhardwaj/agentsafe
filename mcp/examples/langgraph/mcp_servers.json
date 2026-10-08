@@ -1,0 +1,8 @@
+{
+  "billing": {
+    "transport": "stdio",
+    "command": "bin/agentsafe-mcp",
+    "args": ["--log", "run/calls.jsonl", "--policy", "run/policy.json", "--started-by", "support-agent", "--",
+             "bin/billing-mcp", "--state", "run/books.json"]
+  }
+}

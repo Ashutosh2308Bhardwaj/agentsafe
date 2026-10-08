@@ -12,3 +12,7 @@ go.work
 go.work.sum
 # the file store's append-lock files, created next to every log
 *.jsonl.append
+# the LangGraph example's build and run output
+mcp/examples/langgraph/bin/
+mcp/examples/langgraph/run/
+.venv/

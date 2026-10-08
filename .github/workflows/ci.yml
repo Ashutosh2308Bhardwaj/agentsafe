@@ -143,3 +143,19 @@ jobs:
       - name: the same, with the log sealed at rest (a test key, not a secret)
         run: ./scripts/money_sweep.sh
         env: { AGENTSAFE_LOG_KEY: "4242424242424242424242424242424242424242424242424242424242424242" } # quoted: unquoted, YAML reads 64 digits as a float
+  # A real LangGraph agent (Python) using a billing MCP server through agentsafe-mcp, with a person approving
+  # from the command line: the claim that agentsafe works under any MCP framework, run on every push.
+  langgraph-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version: stable, cache-dependency-path: mcp/go.sum }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.12" }
+      - name: install the Python agent's dependencies (every one pinned by hash)
+        run: python -m pip install --require-hashes -r mcp/examples/langgraph/requirements.txt
+      - name: the agent, the proxy, the billing server, and an approval
+        run: ./mcp/examples/langgraph/run.sh
+        env: { PYTHON: python }
