@@ -22,7 +22,8 @@ func killHookFn(p string) {
 	if p == at {
 		if killSeen++; killSeen == nth {
 			fmt.Printf("    💀 kill -9 at %s (occurrence %d)\n", p, nth)
-			_ = syscall.Kill(os.Getpid(), syscall.SIGKILL) // if this fails we're about to be wrong anyway
+			_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+			select {} // the signal is delivered asynchronously: not one more line may run after the kill point
 		}
 	}
 }
