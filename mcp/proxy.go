@@ -55,7 +55,12 @@ func Open(ctx context.Context, upstream *sdk.ClientSession, log agentsafe.Log, p
 		if err := policy.check(t); err != nil {
 			return nil, fmt.Errorf("%w: policy for %s: %w", agentsafe.ErrConfig, t.Name, err)
 		}
-		tools = append(tools, &keyedTool{upstreamTool: base, policy: policy})
+		keyed := keyedTool{upstreamTool: base, policy: policy}
+		if policy.Approval == "always" {
+			tools = append(tools, &gatedTool{keyed})
+		} else {
+			tools = append(tools, &keyed)
+		}
 	}
 	for name := range policies {
 		if !seen[name] {
@@ -102,6 +107,11 @@ func (p *Proxy) handle(ctx context.Context, req *sdk.CallToolRequest) (*sdk.Call
 // own, verbatim: content, structured content, isError. Anything else is agentsafe's own message (refused,
 // unknown tool, an outcome that can't be known), which is an error.
 func toResult(r agentsafe.GatewayResult) *sdk.CallToolResult {
+	if r.Pending { // not an error and not a result: nothing was done yet, and the structured form says so
+		var status map[string]any
+		_ = json.Unmarshal([]byte(r.Result), &status)
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: r.Result}}, StructuredContent: status}
+	}
 	var res sdk.CallToolResult
 	if isToolResult(r.Result) && json.Unmarshal([]byte(r.Result), &res) == nil {
 		if r.Replayed {

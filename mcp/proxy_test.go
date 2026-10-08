@@ -73,7 +73,7 @@ func newRig(t *testing.T, log string, up *fakeUpstream) *rig {
 	return newPolicyRig(t, log, up, nil)
 }
 
-func newPolicyRig(t *testing.T, log string, up *fakeUpstream, policies map[string]mcp.Policy) *rig {
+func newPolicyRig(t *testing.T, log string, up *fakeUpstream, policies map[string]mcp.Policy, opts ...agentsafe.Option) *rig {
 	t.Helper()
 	ctx := context.Background()
 	st, ct := sdk.NewInMemoryTransports()
@@ -84,7 +84,7 @@ func newPolicyRig(t *testing.T, log string, up *fakeUpstream, policies map[strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: log}, policies, agentsafe.WithStartedBy("support-agent"))
+	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: log}, policies, append([]agentsafe.Option{agentsafe.WithStartedBy("support-agent")}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

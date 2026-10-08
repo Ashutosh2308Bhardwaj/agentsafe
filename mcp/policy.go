@@ -1,12 +1,10 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"time"
 
@@ -45,6 +43,9 @@ type Policy struct {
 	KeyArgument string `json:"key_argument"`
 	// Timeout bounds one call; past it the outcome is unknown. 0: the gateway's.
 	Timeout Duration `json:"timeout"`
+	// Approval is "always" (every call waits for a human; it needs identity: a decision is addressed by the
+	// operation's key) or "never" (the default).
+	Approval string `json:"approval"`
 }
 
 // Duration is a time.Duration written as text in a policy file ("10s", "2m").
@@ -59,24 +60,6 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	v, err := time.ParseDuration(s)
 	*d = Duration(v)
 	return err
-}
-
-// LoadPolicies reads a policy file: {"tools": {"add_seats": {"identity": ["ticket_id"], "key": "argument",
-// "key_argument": "idempotency_key", "timeout": "10s"}}}.
-func LoadPolicies(path string) (map[string]Policy, error) {
-	raw, err := os.ReadFile(path) //nolint:gosec // the operator's own policy file
-	if err != nil {
-		return nil, err
-	}
-	var file struct {
-		Tools map[string]Policy `json:"tools"`
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields() // a misspelt field would silently weaken a policy
-	if err := dec.Decode(&file); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return file.Tools, nil
 }
 
 // check validates a policy: consistent in itself, and naming only arguments the tool has.
@@ -98,6 +81,14 @@ func (p *Policy) check(t *sdk.Tool) error {
 
 // consistent checks the policy's fields against each other.
 func (p *Policy) consistent() error {
+	if err := p.keyRules(); err != nil {
+		return err
+	}
+	return p.approvalRules()
+}
+
+// keyRules: a key needs identity to be made from, and a way to reach the upstream that's fully specified.
+func (p *Policy) keyRules() error {
 	switch {
 	case p.Key != KeyNone && p.Key != KeyMeta && p.Key != KeyArgument:
 		return fmt.Errorf("key %q: none, meta or argument", p.Key)
@@ -109,6 +100,17 @@ func (p *Policy) consistent() error {
 		return errors.New("key_argument is only used with key: argument")
 	case p.KeyArgument != "" && slices.Contains(p.Identity, p.KeyArgument):
 		return fmt.Errorf("%s can't be both an identity field and the key argument", p.KeyArgument)
+	}
+	return nil
+}
+
+// approvalRules: always or never, and approval needs identity: a decision is addressed by the operation's key.
+func (p *Policy) approvalRules() error {
+	switch {
+	case p.Approval != "" && p.Approval != "always" && p.Approval != "never":
+		return fmt.Errorf("approval %q: always or never", p.Approval)
+	case p.Approval == "always" && len(p.Identity) == 0:
+		return errors.New("approval needs identity fields: a decision is addressed by the operation's key")
 	}
 	return nil
 }
@@ -183,7 +185,27 @@ func (t *keyedTool) CallWithKey(ctx context.Context, key string, args json.RawMe
 // HonoursKey is false for KeyNone: the upstream can't deduplicate, so an unknown outcome is never retried.
 func (t *keyedTool) HonoursKey() bool { return t.policy.Key != KeyNone }
 
+// gatedTool is a keyed tool whose every call waits for a human (Approval: always). It's a separate type so that
+// only a tool whose policy asks for approval is an agentsafe.Gated: the core treats any Gated as needing one.
+type gatedTool struct{ keyedTool }
+
+// NeedsApproval: every call (agentsafe.Gated).
+func (t *gatedTool) NeedsApproval(json.RawMessage) bool { return true }
+
+// Summary is what the approver is shown: the call's arguments, without the key argument (agentsafe.Gated).
+func (t *gatedTool) Summary(args json.RawMessage) (any, error) {
+	var obj map[string]any
+	if err := json.Unmarshal(args, &obj); err != nil {
+		return nil, err
+	}
+	delete(obj, t.policy.KeyArgument)
+	return obj, nil
+}
+
 // Timeout is the policy's per-call timeout (agentsafe.TimeoutTool).
 func (t *keyedTool) Timeout() time.Duration { return time.Duration(t.policy.Timeout) }
 
-var _ agentsafe.IdempotentTool = (*keyedTool)(nil)
+var (
+	_ agentsafe.IdempotentTool = (*keyedTool)(nil)
+	_ agentsafe.Gated          = (*gatedTool)(nil)
+)

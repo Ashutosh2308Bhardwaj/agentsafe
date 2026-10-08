@@ -82,25 +82,32 @@ func TestACallThatCantBeIdentifiedIsRefused(t *testing.T) {
 
 func TestPoliciesAreCheckedAgainstTheUpstream(t *testing.T) {
 	for name, policies := range map[string]map[string]mcp.Policy{
+		"an unknown approval rule":    {"charge": {Identity: []string{"ticket_id"}, Approval: "sometimes"}},
 		"a misspelt tool":             {"chrage": {Identity: []string{"ticket_id"}}},
 		"an argument it doesn't have": {"charge": {Identity: []string{"invoice_id"}}},
 		"argument mode, no argument":  {"charge": {Identity: []string{"ticket_id"}, Key: mcp.KeyArgument}},
 		"a key with no identity":      {"charge": {Key: mcp.KeyMeta}},
 		"an unknown key mode":         {"charge": {Identity: []string{"ticket_id"}, Key: "header"}},
 	} {
-		ctx := context.Background()
-		st, ct := sdk.NewInMemoryTransports()
-		if _, err := (&fakeUpstream{}).server().Connect(ctx, st, nil); err != nil {
-			t.Fatal(err)
-		}
-		upstream, err := sdk.NewClient(&sdk.Implementation{Name: "t", Version: "1"}, nil).Connect(ctx, ct, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: filepath.Join(t.TempDir(), "p.jsonl")}, policies)
+		_, err := openWith(t, policies)
 		if !errors.Is(err, agentsafe.ErrConfig) {
 			t.Errorf("%s: must be refused at startup, got %v", name, err)
 		}
-		_ = upstream.Close()
 	}
+}
+
+// openWith opens a proxy on the fake upstream with these policies.
+func openWith(t *testing.T, policies map[string]mcp.Policy) (*mcp.Proxy, error) {
+	t.Helper()
+	ctx := context.Background()
+	st, ct := sdk.NewInMemoryTransports()
+	if _, err := (&fakeUpstream{}).server().Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := sdk.NewClient(&sdk.Implementation{Name: "t", Version: "1"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upstream.Close() })
+	return mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: filepath.Join(t.TempDir(), "p.jsonl")}, policies)
 }

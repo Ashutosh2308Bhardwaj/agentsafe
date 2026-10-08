@@ -82,7 +82,8 @@ func (g *Gateway) locked(ctx context.Context, f func(*State) error) error {
 	return f(&st)
 }
 
-// settle resolves a call a crash left unfinished, before anything else happens:
+// settle resolves a call a crash left unfinished, before anything else happens, if this gateway serves its tool
+// (one that doesn't, such as an approver's, leaves it to one that does):
 //   - never forwarded (no tool_started): refused; nothing was done;
 //   - forwarded, an IdempotentTool with a key: retried with the same key, unless its downstream can't
 //     deduplicate (KeyHonouring), in which case it's recorded as unknown under the key;
@@ -92,6 +93,9 @@ func (g *Gateway) settle(ctx context.Context, st *State) error {
 		return nil
 	}
 	c := st.Pending[0]
+	if g.r.find(c.Function.Name) == nil {
+		return nil // only a gateway serving the tool can settle its call: an approver's gateway has no tools
+	}
 	if !st.Started[c.ID] {
 		res := errorJSON(errors.New("the gateway stopped before this call was forwarded; nothing was done"))
 		return g.r.emit(ctx, st, Event{Type: EvToolRefused, CallID: c.ID, Tool: c.Function.Name, Result: res})

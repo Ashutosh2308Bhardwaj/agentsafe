@@ -142,3 +142,56 @@ func session(t *testing.T, bin string, args []string, killAt, charge string) (st
 	}
 	return text.String(), nil
 }
+
+// The human loop with real processes and a real OS identity: the agent is told "pending", a person runs
+// `agentsafe-mcp pending` and `approve` (or `reject`) as themselves, and the agent's next call gets the outcome.
+func TestApprovingFromTheCommandLine(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	me, err := osIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const charge = `{"ticket_id":"T-77","amount":"1200.00"}`
+	for _, c := range []struct {
+		name, approvers, startedBy, decision string
+		decided                              bool   // the decision is accepted
+		why                                  string // why it's refused, if it is
+		after                                string // what the agent's next call gets
+		charges                              int
+	}{
+		{"an approver approves", me, "support-agent", "approve", true, "", "charged 1200.00 (charge 1)", 1},
+		{"someone not on the list", "user:someone-else", "support-agent", "approve", false, "not on the approver list", "pending_approval", 0},
+		{"the agent's own operator", me, me, "approve", false, "started this run", "pending_approval", 0},
+		{"an approver rejects", me, "support-agent", "reject", true, "", "rejected", 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := t.TempDir()
+			log, books, policy := filepath.Join(run, "calls.jsonl"), filepath.Join(run, "books.json"), filepath.Join(run, "policy.json")
+			cfg := fmt.Sprintf(`{"approvers":[%q],"tools":{"charge":{"identity":["ticket_id"],"key":"argument","key_argument":"idempotency_key","approval":"always"}}}`, c.approvers)
+			if err := os.WriteFile(policy, []byte(cfg), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			serve := []string{"--log", log, "--policy", policy, "--started-by", c.startedBy, "--", upstreamBin, "--state", books}
+
+			first, err := session(t, proxyBin, serve, "", charge)
+			var p struct{ Status, Key string }
+			if err != nil || json.Unmarshal([]byte(first), &p) != nil || p.Status != "pending_approval" {
+				t.Fatalf("the agent is told pending: %q %v", first, err)
+			}
+			if out, err := exec.Command(proxyBin, "pending", "--log", log, "--policy", policy).CombinedOutput(); err != nil || !strings.Contains(string(out), p.Key) {
+				t.Fatalf("pending lists it: %s %v", out, err)
+			}
+			out, err := exec.Command(proxyBin, c.decision, "--log", log, "--policy", policy, "--reason", "test", p.Key).CombinedOutput()
+			if (err == nil) != c.decided || !strings.Contains(string(out), c.why) {
+				t.Fatalf("%s by %s: accepted=%v, want %v (%q): %s", c.decision, me, err == nil, c.decided, c.why, out)
+			}
+			after, err := session(t, proxyBin, serve, "", charge)
+			raw, _ := os.ReadFile(books)
+			if err != nil || !strings.Contains(after, c.after) || (c.charges > 0) != strings.Contains(string(raw), fmt.Sprintf(`"charges":%d`, c.charges)) {
+				t.Fatalf("the next call: %q (want %q), books %s, err %v", after, c.after, raw, err)
+			}
+		})
+	}
+}
