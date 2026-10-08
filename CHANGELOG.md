@@ -6,6 +6,13 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-08
+
+Hardening of the MCP proxy after an outside review: it fails closed, forwards the client's metadata (and replays it
+on a retry), and can prove a server honours its key. Core v0.5.0 (`Gateway.Handle`, log format v6) and
+**`mcp/v0.2.0`**; the other modules move to v0.5.0. **Breaking for `mcp`**: tools without a policy are no longer
+exposed. **A v0.4 library refuses a v6 log.**
+
 ### Changed (breaking, `mcp`)
 
 - **The proxy fails closed.** A tool without a policy is no longer passed through: it isn't exposed to the agent
@@ -185,7 +192,8 @@ The first release: correctness primitives for LLM agents that act on money, hard
 - A payout a human rejected could be approved if the model proposed it again under a new call id (found by property tests).
 - The example gateway charged once per key only for sequential calls, not simultaneous ones.
 
-[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.1.0...v0.2.0
