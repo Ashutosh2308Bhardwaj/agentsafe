@@ -3,8 +3,9 @@
 // and sends every call through an agentsafe.Gateway: logged before it's forwarded, settled after a crash, and
 // recorded with what came back. See docs/MCP_PROXY.md.
 //
-// This is phase 1 of that design: pass-through and logging. Idempotency keys, replays of completed
-// operations and approvals come in later phases.
+// A tool with a Policy is protected by an idempotency key: a repeated operation is answered from the log, a
+// changed one is a conflict, and the key reaches the upstream where it can deduplicate. A tool without one is
+// passed through and logged. Approvals come in a later phase.
 package mcp
 
 import (
@@ -26,12 +27,15 @@ type Proxy struct {
 	tools    []*sdk.Tool
 }
 
-// Open lists the upstream's tools and opens a Gateway on log for them. opts are the Gateway's (WithScope,
+// Open lists the upstream's tools and opens a Gateway on log for them, each protected by its policy (keyed by
+// tool name; nil: every tool passed through and logged). A policy for a tool the upstream doesn't have is an
+// error: a misspelt name would leave the real tool unprotected. opts are the Gateway's (WithScope,
 // WithStartedBy, WithToolTimeout, WithLogf, WithRedactor, WithHook, ...). The Proxy holds the log's lease
 // until Close.
-func Open(ctx context.Context, upstream *sdk.ClientSession, log agentsafe.Log, opts ...agentsafe.Option) (*Proxy, error) {
+func Open(ctx context.Context, upstream *sdk.ClientSession, log agentsafe.Log, policies map[string]Policy, opts ...agentsafe.Option) (*Proxy, error) {
 	p := &Proxy{upstream: upstream}
 	var tools []agentsafe.Tool
+	seen := map[string]bool{}
 	for t, err := range upstream.Tools(ctx, nil) {
 		if err != nil {
 			return nil, fmt.Errorf("listing the upstream's tools: %w", err)
@@ -40,9 +44,22 @@ func Open(ctx context.Context, upstream *sdk.ClientSession, log agentsafe.Log, o
 		if err != nil {
 			return nil, fmt.Errorf("tool %s: input schema: %w", t.Name, err)
 		}
-		p.tools = append(p.tools, t)
-		tools = append(tools, &upstreamTool{session: upstream, spec: agentsafe.ToolSpec{Name: t.Name,
-			Description: t.Description, Parameters: schema}})
+		p.tools, seen[t.Name] = append(p.tools, t), true
+		base := upstreamTool{session: upstream, spec: agentsafe.ToolSpec{Name: t.Name, Description: t.Description, Parameters: schema}}
+		policy, ok := policies[t.Name]
+		if !ok {
+			tools = append(tools, &base)
+			continue
+		}
+		if err := policy.check(t); err != nil {
+			return nil, fmt.Errorf("%w: policy for %s: %w", agentsafe.ErrConfig, t.Name, err)
+		}
+		tools = append(tools, &keyedTool{upstreamTool: base, policy: policy})
+	}
+	for name := range policies {
+		if !seen[name] {
+			return nil, fmt.Errorf("%w: a policy for %q, which the upstream doesn't have", agentsafe.ErrConfig, name)
+		}
 	}
 	g, err := agentsafe.OpenGateway(ctx, log, append([]agentsafe.Option{agentsafe.WithTools(tools...)}, opts...)...)
 	if err != nil {
@@ -85,7 +102,7 @@ func (p *Proxy) handle(ctx context.Context, req *sdk.CallToolRequest) (*sdk.Call
 // unknown tool, an outcome that can't be known), which is an error.
 func toResult(r agentsafe.GatewayResult) *sdk.CallToolResult {
 	var res sdk.CallToolResult
-	if err := json.Unmarshal([]byte(r.Result), &res); err == nil && res.Content != nil {
+	if isToolResult(r.Result) && json.Unmarshal([]byte(r.Result), &res) == nil {
 		if r.Replayed {
 			if res.Meta == nil {
 				res.Meta = sdk.Meta{}
@@ -95,6 +112,18 @@ func toResult(r agentsafe.GatewayResult) *sdk.CallToolResult {
 		return &res
 	}
 	return errorResult(r.Result)
+}
+
+// isToolResult reports whether a logged result is an upstream's CallToolResult: an object with a "content"
+// field. Checked on the JSON itself: the SDK's decoder fills in an empty Content for any object, so decoding
+// can't tell agentsafe's {"error": ...} from a result.
+func isToolResult(result string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(result), &fields) != nil {
+		return false
+	}
+	_, ok := fields["content"]
+	return ok
 }
 
 func errorResult(text string) *sdk.CallToolResult {

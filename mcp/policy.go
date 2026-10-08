@@ -1,0 +1,189 @@
+package mcp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"time"
+
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// KeyMode is how an operation's idempotency key reaches the upstream server. MCP's tools/call has no key
+// field, so it's a choice per tool.
+type KeyMode string
+
+// The ways a key can reach the upstream.
+const (
+	// KeyNone: the upstream can't receive a key. A repeated operation is still answered from the log, but an
+	// outcome the proxy couldn't see (a crash or timeout mid-call) is never retried: it's recorded as
+	// unknown, and asking again gets that answer.
+	KeyNone KeyMode = "none"
+	// KeyMeta: in the call's _meta, under MetaPrefix+"idempotency-key", for servers that read it.
+	KeyMeta KeyMode = "meta"
+	// KeyArgument: as a tool argument the upstream already deduplicates on (Policy.KeyArgument).
+	KeyArgument KeyMode = "argument"
+)
+
+// MetaKeyIdempotency is the _meta key the idempotency key travels under in KeyMeta mode.
+const MetaKeyIdempotency = MetaPrefix + "idempotency-key"
+
+// Policy is how the proxy protects one upstream tool. A tool without one is passed through and logged.
+type Policy struct {
+	// Identity names the arguments that make a call one operation: they're hashed into its key. A refund's
+	// might be ticket_id and charge_id. The other arguments are its payload: the same operation with a
+	// different payload is a conflict, never a second effect.
+	Identity []string `json:"identity"`
+	// Key is how the key reaches the upstream: none (the default), meta, or argument.
+	Key KeyMode `json:"key"`
+	// KeyArgument is the argument the upstream deduplicates on, for Key: argument.
+	KeyArgument string `json:"key_argument"`
+	// Timeout bounds one call; past it the outcome is unknown. 0: the gateway's.
+	Timeout Duration `json:"timeout"`
+}
+
+// Duration is a time.Duration written as text in a policy file ("10s", "2m").
+type Duration time.Duration
+
+// UnmarshalJSON reads "10s".
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	v, err := time.ParseDuration(s)
+	*d = Duration(v)
+	return err
+}
+
+// LoadPolicies reads a policy file: {"tools": {"add_seats": {"identity": ["ticket_id"], "key": "argument",
+// "key_argument": "idempotency_key", "timeout": "10s"}}}.
+func LoadPolicies(path string) (map[string]Policy, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // the operator's own policy file
+	if err != nil {
+		return nil, err
+	}
+	var file struct {
+		Tools map[string]Policy `json:"tools"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields() // a misspelt field would silently weaken a policy
+	if err := dec.Decode(&file); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return file.Tools, nil
+}
+
+// check validates a policy: consistent in itself, and naming only arguments the tool has.
+func (p *Policy) check(t *sdk.Tool) error {
+	if p.Key == "" {
+		p.Key = KeyNone
+	}
+	if err := p.consistent(); err != nil {
+		return err
+	}
+	props := schemaProperties(t.InputSchema)
+	for _, f := range append(slices.Clone(p.Identity), p.KeyArgument) {
+		if f != "" && props != nil && !props[f] {
+			return fmt.Errorf("the tool has no argument %q", f)
+		}
+	}
+	return nil
+}
+
+// consistent checks the policy's fields against each other.
+func (p *Policy) consistent() error {
+	switch {
+	case p.Key != KeyNone && p.Key != KeyMeta && p.Key != KeyArgument:
+		return fmt.Errorf("key %q: none, meta or argument", p.Key)
+	case len(p.Identity) == 0 && p.Key != KeyNone:
+		return errors.New("a key needs identity fields to be made from")
+	case p.Key == KeyArgument && p.KeyArgument == "":
+		return errors.New("key: argument needs key_argument, the argument the upstream deduplicates on")
+	case p.Key != KeyArgument && p.KeyArgument != "":
+		return errors.New("key_argument is only used with key: argument")
+	case p.KeyArgument != "" && slices.Contains(p.Identity, p.KeyArgument):
+		return fmt.Errorf("%s can't be both an identity field and the key argument", p.KeyArgument)
+	}
+	return nil
+}
+
+// schemaProperties is the set of argument names a tool's input schema declares; nil if it declares none.
+func schemaProperties(schema any) map[string]bool {
+	var s struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if b, err := json.Marshal(schema); err != nil || json.Unmarshal(b, &s) != nil || s.Properties == nil {
+		return nil
+	}
+	names := map[string]bool{}
+	for k := range s.Properties {
+		names[k] = true
+	}
+	return names
+}
+
+// keyedTool is an upstream tool with a policy: an agentsafe.IdempotentTool, so the Gateway gives each call a
+// key, answers repeats from the log, and refuses a changed payload.
+type keyedTool struct {
+	upstreamTool
+	policy Policy
+}
+
+// Identity splits the arguments into the operation's identity and its payload. The key argument, if the
+// model sent one, is part of neither: a model inventing a new key per try must not turn a retry into a
+// conflict.
+func (t *keyedTool) Identity(args json.RawMessage) (any, any, error) {
+	var obj map[string]any
+	if err := json.Unmarshal(args, &obj); err != nil {
+		return nil, nil, err
+	}
+	identity := map[string]any{}
+	for _, f := range t.policy.Identity {
+		v, ok := obj[f]
+		if !ok || v == nil {
+			return nil, nil, fmt.Errorf("missing %s: it identifies the operation", f)
+		}
+		identity[f] = v
+		delete(obj, f)
+	}
+	delete(obj, t.policy.KeyArgument)
+	return identity, obj, nil
+}
+
+// Validate refuses a call that can't be identified before anything runs: unidentified, it would have no key.
+func (t *keyedTool) Validate(_ context.Context, args json.RawMessage) error {
+	_, _, err := t.Identity(args)
+	return err
+}
+
+// CallWithKey forwards the call with its key, where the policy says the upstream reads it.
+func (t *keyedTool) CallWithKey(ctx context.Context, key string, args json.RawMessage) (any, error) {
+	params := &sdk.CallToolParams{Name: t.spec.Name, Arguments: args}
+	switch t.policy.Key {
+	case KeyMeta:
+		params.Meta = sdk.Meta{MetaKeyIdempotency: key}
+	case KeyArgument:
+		var obj map[string]any
+		if err := json.Unmarshal(args, &obj); err != nil {
+			return nil, err
+		}
+		obj[t.policy.KeyArgument] = key // the proxy's key, never the model's
+		params.Arguments = obj
+	case KeyNone:
+	}
+	return t.session.CallTool(ctx, params)
+}
+
+// HonoursKey is false for KeyNone: the upstream can't deduplicate, so an unknown outcome is never retried.
+func (t *keyedTool) HonoursKey() bool { return t.policy.Key != KeyNone }
+
+// Timeout is the policy's per-call timeout (agentsafe.TimeoutTool).
+func (t *keyedTool) Timeout() time.Duration { return time.Duration(t.policy.Timeout) }
+
+var _ agentsafe.IdempotentTool = (*keyedTool)(nil)

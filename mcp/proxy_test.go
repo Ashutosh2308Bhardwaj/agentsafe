@@ -16,8 +16,11 @@ import (
 
 // fakeUpstream is an MCP server like a billing integration: a read, a billed write, and a tool that fails.
 type fakeUpstream struct {
-	mu    sync.Mutex
-	seats int
+	mu      sync.Mutex
+	seats   int
+	charges int               // effects of charge: what the customer was actually billed for
+	keys    []string          // the idempotency key each charge request carried, and how ("arg:"/"meta:")
+	done    map[string]string // what it answered per key: it deduplicates, like a payment API
 }
 
 func (f *fakeUpstream) server() *sdk.Server {
@@ -42,6 +45,10 @@ func (f *fakeUpstream) server() *sdk.Server {
 			f.seats += in.Add
 			return text(false, "now %d seats", f.seats), nil
 		})
+	s.AddTool(&sdk.Tool{Name: "charge", Description: "Bill the customer", InputSchema: map[string]any{
+		"type": "object", "properties": map[string]any{"ticket_id": map[string]any{"type": "string"},
+			"amount": map[string]any{"type": "string"}, "idempotency_key": map[string]any{"type": "string"}}}},
+		f.charge)
 	s.AddTool(&sdk.Tool{Name: "cancel_plan", Description: "Always refuses", InputSchema: object},
 		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 			return text(true, "cancellations need a human"), nil
@@ -63,6 +70,11 @@ type rig struct {
 
 func newRig(t *testing.T, log string, up *fakeUpstream) *rig {
 	t.Helper()
+	return newPolicyRig(t, log, up, nil)
+}
+
+func newPolicyRig(t *testing.T, log string, up *fakeUpstream, policies map[string]mcp.Policy) *rig {
+	t.Helper()
 	ctx := context.Background()
 	st, ct := sdk.NewInMemoryTransports()
 	if _, err := up.server().Connect(ctx, st, nil); err != nil {
@@ -72,7 +84,7 @@ func newRig(t *testing.T, log string, up *fakeUpstream) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: log}, agentsafe.WithStartedBy("support-agent"))
+	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: log}, policies, agentsafe.WithStartedBy("support-agent"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +128,7 @@ func TestTheAgentSeesTheUpstreamsTools(t *testing.T) {
 		}
 		got[tool.Name] = tool
 	}
-	if len(got) != 3 || got["add_seats"] == nil || got["get_seats"].Annotations == nil || !got["get_seats"].Annotations.ReadOnlyHint {
+	if len(got) != 4 || got["add_seats"] == nil || got["get_seats"].Annotations == nil || !got["get_seats"].Annotations.ReadOnlyHint {
 		t.Fatalf("the agent must see the upstream's tools, as the upstream describes them: %v", got)
 	}
 }
@@ -184,4 +196,33 @@ func callsAndResults(events []agentsafe.Event) (received, results []string) {
 		}
 	}
 	return received, results
+}
+
+// charge bills once per idempotency key, from an argument or from _meta, like a payment API.
+func (f *fakeUpstream) charge(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+	var args map[string]any
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return nil, err
+	}
+	amount, _ := args["amount"].(string)
+	key, how := "", ""
+	if k, ok := args["idempotency_key"].(string); ok {
+		key, how = k, "arg:"
+	}
+	if k, ok := req.Params.Meta[mcp.MetaKeyIdempotency].(string); ok {
+		key, how = k, "meta:"
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keys = append(f.keys, how+key)
+	if prev, ok := f.done[key]; ok && key != "" {
+		return text(false, "%s", prev), nil
+	}
+	f.charges++
+	answer := fmt.Sprintf("charged %s (charge %d)", amount, f.charges)
+	if f.done == nil {
+		f.done = map[string]string{}
+	}
+	f.done[key] = answer
+	return text(false, "%s", answer), nil
 }

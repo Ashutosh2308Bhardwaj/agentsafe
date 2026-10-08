@@ -61,7 +61,7 @@ func run() error {
 	if !*quiet {
 		opts = append(opts, agentsafe.WithLogf(func(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) }))
 	}
-	proxy, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: *logPath}, opts...)
+	proxy, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: *logPath}, nil, opts...)
 	if err != nil {
 		return err
 	}
