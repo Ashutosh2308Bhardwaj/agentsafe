@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
@@ -71,5 +72,50 @@ func TestPassCantBeCombinedWithProtection(t *testing.T) {
 		if !errors.Is(err, agentsafe.ErrConfig) || !strings.Contains(err.Error(), "unprotected") {
 			t.Errorf("%s: must be refused: %v", name, err)
 		}
+	}
+}
+
+// What Hidden and Unprotected return is the caller's: changing it doesn't change the proxy.
+func TestTheListsAreCopies(t *testing.T) {
+	ctx := context.Background()
+	st, ct := sdk.NewInMemoryTransports()
+	if _, err := (&fakeUpstream{}).server().Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := sdk.NewClient(&sdk.Implementation{Name: "t", Version: "1"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = upstream.Close() }()
+	p, err := mcp.Open(ctx, upstream, &agentsafe.FileLog{Path: filepath.Join(t.TempDir(), "p.jsonl")},
+		map[string]mcp.Policy{"add_seats": {Pass: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Close() }()
+	p.Hidden()[0], p.Unprotected()[0] = "changed", "changed"
+	if slices.Contains(p.Hidden(), "changed") || slices.Contains(p.Unprotected(), "changed") {
+		t.Fatalf("hidden %v, unprotected %v", p.Hidden(), p.Unprotected())
+	}
+}
+
+// A pass policy's timeout is applied: the tool tells the Gateway its own timeout, as a protected one does.
+func TestAPassPolicyKeepsItsTimeout(t *testing.T) {
+	ctx := context.Background()
+	st, ct := sdk.NewInMemoryTransports()
+	if _, err := (&fakeUpstream{}).server().Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := sdk.NewClient(&sdk.Implementation{Name: "t", Version: "1"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = upstream.Close() }()
+	tool, err := mcp.ProxiedTool(ctx, upstream, "get_seats", mcp.Policy{Pass: true, Timeout: mcp.Duration(2 * time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tt, ok := tool.(agentsafe.TimeoutTool); !ok || tt.Timeout() != 2*time.Second {
+		t.Fatalf("%T: the pass policy's timeout isn't applied", tool)
 	}
 }

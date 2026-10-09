@@ -81,4 +81,5 @@ issues created: 1
 
 For a tool without a key, `agentsafe-mcp` answers an exact repeat from its log, and when a call's outcome is lost
 to a crash or a timeout it records it as **unknown and never retries it**, rather than guessing. For a tool with
-one, it sends the same key on a retry. `inspect --policy-out` writes that policy for any server above.
+one, it sends the same key on a retry, once `verify` has shown the server deduplicates on it. `inspect --policy-out`
+writes a starting policy for any server above: no keys, writes gated, reads hidden until reviewed.

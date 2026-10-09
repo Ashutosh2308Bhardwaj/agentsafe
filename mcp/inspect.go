@@ -27,12 +27,14 @@ type ToolSummary struct {
 	Annotated   bool `json:"annotated"`
 	Destructive bool `json:"destructive"` // destructiveHint, as MCP defaults it (true) for a write
 	Idempotent  bool `json:"idempotent"`  // idempotentHint: same arguments twice, no further effect (the server's claim)
-	// KeyArgument is an argument that looks like an idempotency key (idempotency_key, request_id, client_token...):
-	// a server that deduplicates on it lets agentsafe retry safely. A name is a hint, not proof: run verify.
+	// KeyArgument is a candidate: an argument named like an idempotency key (idempotency_key, request_id,
+	// client_token...). A name isn't proof the server deduplicates on it, so the suggested policy doesn't use it:
+	// verify it (agentsafe-mcp verify with key: argument), then switch the policy to it.
 	KeyArgument string `json:"key_argument,omitempty"`
 	// Required are the arguments the schema requires: often, not always, what identifies an operation.
 	Required []string `json:"required,omitempty"`
-	// Policy is the suggested starting policy. It stays a suggestion: read it before you use it.
+	// Policy is the suggested starting policy; nil means the tool stays hidden until someone writes one. It stays
+	// a suggestion: read it before you use it.
 	Policy *Policy `json:"policy"`
 	Note   string  `json:"note,omitempty"`
 }
@@ -41,17 +43,36 @@ type ToolSummary struct {
 var keyNames = []string{"idempotencykey", "idempotencytoken", "requestid", "clientrequestid", "clienttoken",
 	"dedupkey", "dedupekey", "deduplicationkey", "deduplicationid"}
 
+// InspectOption changes what Inspect suggests.
+type InspectOption func(*inspectOptions)
+
+type inspectOptions struct{ trustAnnotations bool }
+
+// TrustAnnotations lets the server's hints relax the suggestion: a tool marked read-only passes, and a write
+// marked not destructive needs no approval. MCP calls the hints untrusted (a buggy or hostile server can mark a
+// write read-only), so it's for a server you trust.
+func TrustAnnotations() InspectOption { return func(o *inspectOptions) { o.trustAnnotations = true } }
+
 // Inspect lists the upstream's tools and, for each, what it says about itself and a starting policy. It calls no
 // tool, so it's safe against any server.
 //
-// The suggestion fails closed: a read-only tool passes; a write is identified by all its arguments (identity
-// ["*"]), keyed on its key argument if it has one, and waits for approval if it may be destructive, as MCP
-// assumes unless told otherwise. All arguments, not the required ones, because a schema can't say what makes a
-// call one operation: required arguments can be too few (a generic make_api_request(service, method, request)
-// would make every payment the same operation, refusing the second). With all of them an exact repeat is
-// answered from the log and nothing legitimate is refused; naming the identity fields by hand adds conflict
-// detection (the same ticket with a new amount).
-func Inspect(ctx context.Context, upstream *sdk.ClientSession) (Inspection, error) {
+// The suggestion fails closed, and a hint can only make it more careful: the server's word isn't proof. A write
+// is identified by all its arguments (identity ["*"]), gets no key, and waits for approval. A tool marked
+// read-only gets no policy, so it stays hidden until someone reviews it (TrustAnnotations: it passes, and a
+// write marked not destructive needs no approval). No key, even for an argument named like one: a key lets
+// agentsafe retry an outcome it lost, which is safe only if the server deduplicates on it, and a name doesn't
+// say that. The argument is reported as a candidate for agentsafe-mcp verify.
+//
+// All arguments, not the required ones, because a schema can't say what makes a call one operation: required
+// arguments can be too few (a generic make_api_request(service, method, request) would make every payment the
+// same operation, refusing the second). With all of them an exact repeat is answered from the log and nothing
+// legitimate is refused; naming the identity fields by hand adds conflict detection (the same ticket with a new
+// amount).
+func Inspect(ctx context.Context, upstream *sdk.ClientSession, opts ...InspectOption) (Inspection, error) {
+	var o inspectOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	var in Inspection
 	if r := upstream.InitializeResult(); r != nil && r.ServerInfo != nil {
 		in.Server, in.Version = r.ServerInfo.Name, r.ServerInfo.Version
@@ -60,12 +81,12 @@ func Inspect(ctx context.Context, upstream *sdk.ClientSession) (Inspection, erro
 		if err != nil {
 			return in, fmt.Errorf("listing the upstream's tools: %w", err)
 		}
-		in.Tools = append(in.Tools, summarize(t))
+		in.Tools = append(in.Tools, summarize(t, o))
 	}
 	return in, nil
 }
 
-func summarize(t *sdk.Tool) ToolSummary {
+func summarize(t *sdk.Tool, o inspectOptions) ToolSummary {
 	s := ToolSummary{Name: t.Name, Write: true, Destructive: true, Annotated: t.Annotations != nil}
 	if a := t.Annotations; a != nil {
 		s.Write = !a.ReadOnlyHint
@@ -73,32 +94,42 @@ func summarize(t *sdk.Tool) ToolSummary {
 		s.Idempotent = s.Write && a.IdempotentHint
 	}
 	if !s.Write {
-		s.Policy, s.Note = &Policy{Pass: true}, "read-only, as the server says"
+		if o.trustAnnotations {
+			s.Policy, s.Note = &Policy{Pass: true}, "read-only, as the server says (annotations trusted)"
+		} else {
+			s.Note = "read-only by the server's word: hidden until you review it, then \"pass\": true"
+		}
 		return s
 	}
-	props, required := schemaProperties(t.InputSchema), schemaRequired(t.InputSchema)
-	for name := range props {
-		if isKeyName(name) && (s.KeyArgument == "" || name < s.KeyArgument) {
-			s.KeyArgument = name
-		}
-	}
-	for _, r := range required {
+	s.KeyArgument = candidateKey(schemaProperties(t.InputSchema))
+	for _, r := range schemaRequired(t.InputSchema) {
 		if r != s.KeyArgument {
 			s.Required = append(s.Required, r)
 		}
 	}
 	p := &Policy{Identity: []string{AllArguments}, Key: KeyNone}
 	if s.KeyArgument != "" {
-		p.Key, p.KeyArgument = KeyArgument, s.KeyArgument
-		s.Note = "has a key argument: confirm the server deduplicates on it (agentsafe-mcp verify)"
+		s.Note = "candidate key " + s.KeyArgument + ": verify the server deduplicates on it (agentsafe-mcp verify), " +
+			"then set key: argument. Until then an outcome lost to a crash or timeout is unknown, never retried"
 	} else {
 		s.Note = "no key argument: an outcome lost to a crash or timeout is recorded as unknown, never retried"
 	}
-	if s.Destructive {
+	if s.Destructive || !o.trustAnnotations {
 		p.Approval = "always"
 	}
 	s.Policy = p
 	return s
+}
+
+// candidateKey is the argument named like an idempotency key (the first by name, if several), or "".
+func candidateKey(props map[string]bool) string {
+	var key string
+	for name := range props {
+		if isKeyName(name) && (key == "" || name < key) {
+			key = name
+		}
+	}
+	return key
 }
 
 func isKeyName(name string) bool {
@@ -118,7 +149,8 @@ func schemaRequired(schema any) []string {
 	return s.Required
 }
 
-// Starter is a policy file from an inspection: a policy for each tool that has a suggestion, and approvers.
+// Starter is a policy file from an inspection: a policy for each tool that has a suggestion, and approvers. A
+// tool without one stays hidden.
 func (in Inspection) Starter(approvers ...string) Config {
 	c := Config{Approvers: approvers, Tools: map[string]Policy{}}
 	for _, t := range in.Tools {

@@ -15,14 +15,17 @@ import (
 )
 
 // inspect lists a server's tools, what each says about itself, and a starting policy, without calling any of them
-// (mcp.Inspect). --policy-out writes the starting policy file, with the person running it as the approver.
+// (mcp.Inspect). --policy-out writes the starting policy file, with the person running it as the approver. The
+// suggestion doesn't trust the server's hints unless --trust-annotations says to, and never uses a candidate key.
 func inspect(args []string) error {
 	fs := flag.NewFlagSet("agentsafe-mcp inspect", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the inspection as JSON")
 	out := fs.String("policy-out", "", "write a starting policy file here (it must not exist yet)")
 	timeout := fs.Duration("timeout", time.Minute, "give up on a server that hasn't listed its tools by then")
+	trust := fs.Bool("trust-annotations", false, "let the server's hints relax the policy: read-only tools pass, "+
+		"writes marked not destructive need no approval (MCP calls the hints untrusted)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp inspect [--json] [--policy-out FILE] -- COMMAND [ARGS...]")
+		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp inspect [--json] [--policy-out FILE] [--trust-annotations] -- COMMAND [ARGS...]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -39,7 +42,11 @@ func inspect(args []string) error {
 		return err
 	}
 	defer func() { _ = upstream.Close() }()
-	in, err := mcp.Inspect(ctx, upstream)
+	var opts []mcp.InspectOption
+	if *trust {
+		opts = append(opts, mcp.TrustAnnotations())
+	}
+	in, err := mcp.Inspect(ctx, upstream, opts...)
 	if err != nil {
 		return err
 	}
@@ -59,8 +66,9 @@ func inspect(args []string) error {
 	printInspection(in)
 	if *out != "" {
 		fmt.Printf("\nWrote %s. Read it before you use it: identity [\"*\"] (all arguments) never refuses a call but sees no "+
-			"conflicts: name the fields that identify an operation where you know them. A key argument is only safe if "+
-			"the server deduplicates on it (agentsafe-mcp verify).\n", *out)
+			"conflicts: name the fields that identify an operation where you know them. No tool gets a key: for a "+
+			"candidate key, run agentsafe-mcp verify with key: argument, and switch to it if it passes. Tools left "+
+			"out stay hidden until you add a policy.\n", *out)
 	}
 	return nil
 }
@@ -98,10 +106,10 @@ func printInspection(in mcp.Inspection) {
 			}
 		}
 	}
-	fmt.Printf("%s %s: %d tools, %d read-only, %d that change something (%d with a key argument); %d annotated.\n\n",
+	fmt.Printf("%s %s: %d tools, %d read-only, %d that change something (%d with a candidate key); %d annotated.\n\n",
 		in.Server, in.Version, len(in.Tools), len(in.Tools)-writes, writes, keyed, annotated)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "TOOL\tKIND\tKEY ARGUMENT\tSUGGESTED POLICY")
+	_, _ = fmt.Fprintln(w, "TOOL\tKIND\tCANDIDATE KEY\tSUGGESTED POLICY")
 	for _, t := range in.Tools {
 		kind := "read"
 		if t.Write {
@@ -120,6 +128,9 @@ func printInspection(in mcp.Inspection) {
 
 // describe is a policy in a few words.
 func describe(p *mcp.Policy) string {
+	if p == nil {
+		return "hidden until reviewed"
+	}
 	if p.Pass {
 		return "pass"
 	}

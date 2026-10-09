@@ -14,10 +14,12 @@ package mcptest
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"testing"
 
+	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/tooltest"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,25 +45,44 @@ func CheckSameKey(ctx context.Context, upstream *sdk.ClientSession, tool string,
 	return tooltest.CheckSameKey(ctx, keyed, args, effects)
 }
 
-// OneEffect fails t unless one call to the upstream's tool makes exactly one effect. It's the check for every
-// tool that changes something, keyed or not: none (the call did nothing, or effects counts the wrong thing) or
-// two (the server repeats the effect inside one call) are both caught. effects counts the real effects; args
-// are the arguments of one operation.
-func OneEffect(t testing.TB, upstream *sdk.ClientSession, tool string, args json.RawMessage, effects func() int) {
+// OneEffect fails t unless one call to the upstream's tool, made as agentsafe-mcp makes it under policy (with a
+// fresh key where the policy sends one), makes exactly one effect. It's the check for every tool that changes
+// something, keyed or not: none (the call did nothing, or effects counts the wrong thing) or two (the server
+// repeats the effect inside one call) are both caught. effects counts the real effects; args are the arguments of
+// one operation, as the agent sends them (the proxy adds the key).
+func OneEffect(t testing.TB, upstream *sdk.ClientSession, tool string, policy mcp.Policy, args json.RawMessage, effects func() int) {
 	t.Helper()
-	if err := CheckOneEffect(context.Background(), upstream, tool, args, effects); err != nil {
+	if err := CheckOneEffect(context.Background(), upstream, tool, policy, args, effects); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // CheckOneEffect is OneEffect returning an error instead of failing a test.
-func CheckOneEffect(ctx context.Context, upstream *sdk.ClientSession, tool string, args json.RawMessage, effects func() int) error {
+func CheckOneEffect(ctx context.Context, upstream *sdk.ClientSession, tool string, policy mcp.Policy, args json.RawMessage, effects func() int) error {
+	proxied, err := mcp.ProxiedTool(ctx, upstream, tool, policy)
+	if err != nil {
+		return err
+	}
+	// The proxy refuses a call it can't identify before anything runs, so the check does too: no real effect.
+	if v, ok := proxied.(interface {
+		Validate(context.Context, json.RawMessage) error
+	}); ok {
+		if err := v.Validate(ctx, args); err != nil {
+			return fmt.Errorf("%s: the proxy would refuse these arguments: %w", tool, err)
+		}
+	}
 	before := effects()
-	res, err := upstream.CallTool(ctx, &sdk.CallToolParams{Name: tool, Arguments: args})
+	var out any
+	if keyed, ok := proxied.(agentsafe.IdempotentTool); ok {
+		out, err = keyed.CallWithKey(ctx, newKey(), args)
+	} else {
+		out, err = proxied.Call(ctx, args)
+	}
+	res, _ := out.(*sdk.CallToolResult)
 	switch {
 	case err != nil:
 		return fmt.Errorf("%s: the call failed, so nothing can be checked: %w", tool, err)
-	case res.IsError:
+	case res != nil && res.IsError:
 		return fmt.Errorf("%s: the call returned an error, so nothing can be checked: %s", tool, text(res))
 	}
 	switch n := effects() - before; {
@@ -73,6 +94,9 @@ func CheckOneEffect(ctx context.Context, upstream *sdk.ClientSession, tool strin
 	}
 	return nil
 }
+
+// newKey is a key no other call has used, as the Gateway gives a new operation.
+func newKey() string { return rand.Text() }
 
 func text(res *sdk.CallToolResult) string {
 	for _, c := range res.Content {

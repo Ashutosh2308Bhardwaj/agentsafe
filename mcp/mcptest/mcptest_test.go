@@ -73,6 +73,17 @@ func (b *billing) server() *sdk.Server {
 	s.AddTool(&sdk.Tool{Name: "charge_nothing", InputSchema: schema}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		return ok(), nil
 	})
+	s.AddTool(&sdk.Tool{Name: "charge_needs_key", InputSchema: schema}, func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		if key(req) == "" { // a server that requires its key: the agent's arguments alone are refused
+			return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "idempotency_key is required"}}}, nil
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if !b.done[key(req)] {
+			b.done[key(req)], b.charges = true, b.charges+1
+		}
+		return ok(), nil
+	})
 	s.AddTool(&sdk.Tool{Name: "charge_fails", InputSchema: schema}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "card declined"}}}, nil
 	})
@@ -144,7 +155,7 @@ func TestOneCallOneEffect(t *testing.T) {
 		"charge_fails":       "card declined",
 	} {
 		b := &billing{done: map[string]bool{}}
-		err := mcptest.CheckOneEffect(context.Background(), session(t, b), tool, json.RawMessage(`{"ticket_id":"T-1"}`),
+		err := mcptest.CheckOneEffect(context.Background(), session(t, b), tool, unkeyed, json.RawMessage(`{"ticket_id":"T-1"}`),
 			func() int {
 				b.mu.Lock()
 				defer b.mu.Unlock()
@@ -153,5 +164,36 @@ func TestOneCallOneEffect(t *testing.T) {
 		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
 			t.Errorf("%s: got %v, want %q", tool, err, want)
 		}
+	}
+}
+
+var unkeyed = mcp.Policy{Identity: []string{"ticket_id"}}
+
+func (b *billing) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.charges
+}
+
+// The one-effect call is made as the proxy makes it: under a keyed policy it carries a fresh key, so a server that
+// requires its key passes, as it would serve the proxy. Sent as the agent's bare arguments, it would be refused.
+func TestOneEffectSendsTheKeyAsTheProxyDoes(t *testing.T) {
+	b := &billing{done: map[string]bool{}}
+	args := json.RawMessage(`{"ticket_id":"T-1"}`)
+	if err := mcptest.CheckOneEffect(context.Background(), session(t, b), "charge_needs_key", policy, args, b.count); err != nil {
+		t.Fatalf("keyed, as the proxy calls it: %v", err)
+	}
+	err := mcptest.CheckOneEffect(context.Background(), session(t, b), "charge_needs_key", unkeyed, args, b.count)
+	if err == nil || !strings.Contains(err.Error(), "idempotency_key is required") {
+		t.Fatalf("without the key the server refuses: %v", err)
+	}
+}
+
+// Arguments the proxy would refuse (no identity) are refused before any call, as the proxy refuses them.
+func TestOneEffectRefusesWhatTheProxyWould(t *testing.T) {
+	b := &billing{done: map[string]bool{}}
+	err := mcptest.CheckOneEffect(context.Background(), session(t, b), "charge", policy, json.RawMessage(`{}`), b.count)
+	if err == nil || !strings.Contains(err.Error(), "missing ticket_id") || b.count() != 0 {
+		t.Fatalf("got %v with %d charges, want a refusal and none", err, b.count())
 	}
 }

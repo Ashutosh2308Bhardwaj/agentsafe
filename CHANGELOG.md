@@ -6,6 +6,36 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+Fixes from an outside review of mcp/v0.4.0: a suggested policy no longer trusts what a server says about itself,
+and verify calls a tool exactly as the proxy does.
+
+### Changed (breaking, `mcp`)
+
+- **`inspect` never suggests a key.** v0.4.0 turned an argument named like an idempotency key (`request_id`,
+  `client_token`) into `"key": "argument"`, which lets agentsafe retry an outcome it lost: safe only if the server
+  deduplicates on it, which a name doesn't prove. A retry against a server that doesn't would make a second
+  effect. The argument is now reported as a candidate key; `verify` checks it, and only then do you switch.
+- **`inspect` doesn't trust annotations unless asked.** A tool marked read-only gets no policy (it stays hidden
+  until reviewed) and every write waits for approval, whatever `destructiveHint` says: MCP calls the hints
+  untrusted. `--trust-annotations` (`mcp.TrustAnnotations()`) restores v0.4.0's read-only pass and
+  not-destructive-no-approval.
+- `mcptest.OneEffect` and `CheckOneEffect` take the policy: the call is made as the proxy makes it, with a fresh key
+  where the policy sends one. Before, it sent the agent's bare arguments, so a server that requires its key failed a
+  check it would pass in service. Arguments the proxy would refuse (a missing identity field) are refused before any
+  call.
+
+### Added (`mcp`)
+
+- `mcp.ProxiedTool`: a tool as the proxy calls it under a policy, built by the same code as `Open`'s.
+- `verify --timeout` (default 5m) bounds the whole run: a server or `--count` command that hangs ends it with an
+  error.
+
+### Fixed (`mcp`)
+
+- A `pass` policy's `timeout` is applied; it was accepted and ignored.
+- `Hidden()` and `Unprotected()` return copies.
+- `Open`'s comment said a nil policy map passes every tool through; it exposes none (fail closed since v0.2.0).
+
 ## [mcp/v0.4.0] - 2026-10-09
 
 `agentsafe/mcp` only: the core stays at v0.5.0. Released with the [MCP retry scan](mcp/scan/README.md): 24 popular

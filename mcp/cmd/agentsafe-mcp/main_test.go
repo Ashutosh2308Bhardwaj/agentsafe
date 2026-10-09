@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -348,5 +349,22 @@ func TestVerifyWaitsForACountThatLags(t *testing.T) {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("--settle %s: want %q in:\n%s", settle, want, out)
 		}
+	}
+}
+
+// --timeout bounds the whole run: a --count (or a server) that hangs ends verify with an error, not forever.
+func TestVerifyGivesUpOnACountThatHangs(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	books, policy := filepath.Join(dir, "books.json"), filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policy, []byte(`{"tools":{"charge":{"identity":["ticket_id"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	out, err := exec.Command(proxyBin, "verify", "--sandbox", "--timeout", "1s", "--policy", policy, "--tool", "charge",
+		"--args", `{"ticket_id":"VERIFY-1"}`, "--count", "sleep 30", "--", upstreamBin, "--state", books).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "gave up after 1s") || time.Since(start) > 15*time.Second {
+		t.Fatalf("err=%v after %s:\n%s", err, time.Since(start), out)
 	}
 }

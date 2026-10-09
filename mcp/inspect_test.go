@@ -57,8 +57,9 @@ func shopSession(t *testing.T) *sdk.ClientSession {
 	return cs
 }
 
-// Each tool, as it describes itself, and the policy that follows: reads pass; writes are identified by all their
-// arguments, keyed on a key argument if they have one, and gated unless the server says they're not destructive.
+// Each tool, as it describes itself, and the policy that follows. By default a hint can only add caution: every
+// write is identified by all its arguments and gated, a read-only tool stays hidden, and no tool gets a key, a
+// candidate key argument included (a name isn't proof the server deduplicates on it).
 func TestInspectSuggestsAPolicyPerTool(t *testing.T) {
 	in, err := mcp.Inspect(context.Background(), shopSession(t))
 	if err != nil {
@@ -67,25 +68,52 @@ func TestInspectSuggestsAPolicyPerTool(t *testing.T) {
 	if in.Server != "shop-mcp" || in.Version != "2.1.0" || len(in.Tools) != 6 {
 		t.Fatalf("server and tools: %+v", in)
 	}
+	got := summaries(in)
+	all := []string{mcp.AllArguments}
+	gated := &mcp.Policy{Identity: all, Key: mcp.KeyNone, Approval: "always"}
+	want := map[string]*mcp.Policy{
+		"get_order": nil, "create_refund": gated, "send_message": gated,
+		"update_address": gated, "delete_order": gated, "clear_cache": gated,
+	}
+	checkPolicies(t, got, want)
+	if got["create_refund"].KeyArgument != "Idempotency-Key" || got["update_address"].KeyArgument != "request_id" {
+		t.Errorf("candidate keys are reported: %+v", got)
+	}
+	checkHints(t, got)
+}
+
+// TrustAnnotations lets the hints relax the policy, but still gives no tool a key: only verify can show that.
+func TestTrustingTheAnnotations(t *testing.T) {
+	in, err := mcp.Inspect(context.Background(), shopSession(t), mcp.TrustAnnotations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := []string{mcp.AllArguments}
+	checkPolicies(t, summaries(in), map[string]*mcp.Policy{
+		"get_order":      {Pass: true},
+		"create_refund":  {Identity: all, Key: mcp.KeyNone, Approval: "always"},
+		"send_message":   {Identity: all, Key: mcp.KeyNone},
+		"update_address": {Identity: all, Key: mcp.KeyNone},
+		"delete_order":   {Identity: all, Key: mcp.KeyNone, Approval: "always"},
+		"clear_cache":    {Identity: all, Key: mcp.KeyNone, Approval: "always"},
+	})
+}
+
+func summaries(in mcp.Inspection) map[string]mcp.ToolSummary {
 	got := map[string]mcp.ToolSummary{}
 	for _, s := range in.Tools {
 		got[s.Name] = s
 	}
-	all := []string{mcp.AllArguments}
-	want := map[string]*mcp.Policy{
-		"get_order":      {Pass: true},
-		"create_refund":  {Identity: all, Key: mcp.KeyArgument, KeyArgument: "Idempotency-Key", Approval: "always"},
-		"send_message":   {Identity: all, Key: mcp.KeyNone},
-		"update_address": {Identity: all, Key: mcp.KeyArgument, KeyArgument: "request_id"},
-		"delete_order":   {Identity: all, Key: mcp.KeyNone, Approval: "always"},
-		"clear_cache":    {Identity: all, Key: mcp.KeyNone, Approval: "always"},
-	}
+	return got
+}
+
+func checkPolicies(t *testing.T, got map[string]mcp.ToolSummary, want map[string]*mcp.Policy) {
+	t.Helper()
 	for name, p := range want {
 		if !reflect.DeepEqual(got[name].Policy, p) {
 			t.Errorf("%s: policy %+v, want %+v", name, got[name].Policy, p)
 		}
 	}
-	checkHints(t, got)
 }
 
 // checkHints: the hints as the server sent them, MCP's defaults where it sent none, and the required arguments.
@@ -105,7 +133,8 @@ func checkHints(t *testing.T, got map[string]mcp.ToolSummary) {
 	}
 }
 
-// The starter policy file is usable as it is: it loads, and a proxy opens on it, exposing every tool.
+// The starter policy file is usable as it is: it loads, and a proxy opens on it, exposing every tool it has a
+// policy for and hiding the read-only one until someone reviews it.
 func TestTheStarterPolicyOpensAProxy(t *testing.T) {
 	ctx := context.Background()
 	up := shopSession(t)
@@ -130,8 +159,8 @@ func TestTheStarterPolicyOpensAProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the starter must open a proxy: %v\n%s", err, raw)
 	}
-	if h := p.Hidden(); len(h) != 0 {
-		t.Fatalf("every tool has a suggestion: %v", h)
+	if h := p.Hidden(); !reflect.DeepEqual(h, []string{"get_order"}) {
+		t.Fatalf("hidden: %v, want the read-only tool alone", h)
 	}
 }
 

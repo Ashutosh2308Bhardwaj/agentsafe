@@ -14,7 +14,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -33,7 +35,8 @@ type Proxy struct {
 }
 
 // Open lists the upstream's tools and opens a Gateway on log for them, each protected by its policy (keyed by
-// tool name; nil: every tool passed through and logged). A policy for a tool the upstream doesn't have is an
+// tool name). A tool without a policy isn't exposed (Hidden): the proxy fails closed, so nil policies expose
+// nothing. A policy for a tool the upstream doesn't have is an
 // error: a misspelt name would leave the real tool unprotected. opts are the Gateway's (WithScope,
 // WithStartedBy, WithAuthorizer, WithToolTimeout, WithLogf, WithRedactor, WithHook, ...). Each call takes the
 // log's lease while it runs, so proxies in several processes can share a log, and approvals can be written to
@@ -86,6 +89,19 @@ func (p *Proxy) adopt(t *sdk.Tool, policies map[string]Policy) (agentsafe.Tool, 
 		p.hidden = append(p.hidden, t.Name) // fail closed
 		return nil, nil
 	}
+	tool, err := build(p.upstream, t, policy)
+	if err != nil {
+		return nil, err
+	}
+	if policy.Pass && (t.Annotations == nil || !t.Annotations.ReadOnlyHint) {
+		p.unprotected = append(p.unprotected, t.Name)
+	}
+	return tool, nil
+}
+
+// build is one upstream tool as its policy has the proxy call it: passed through, keyed, or keyed and gated.
+// The proxy and the checks (ProxiedTool, KeyedTool) share it, so what's verified is what runs.
+func build(session *sdk.ClientSession, t *sdk.Tool, policy Policy) (agentsafe.Tool, error) {
 	if err := policy.check(t); err != nil {
 		return nil, fmt.Errorf("%w: policy for %s: %w", agentsafe.ErrConfig, t.Name, err)
 	}
@@ -93,13 +109,10 @@ func (p *Proxy) adopt(t *sdk.Tool, policies map[string]Policy) (agentsafe.Tool, 
 	if err != nil {
 		return nil, fmt.Errorf("tool %s: input schema: %w", t.Name, err)
 	}
-	base := upstreamTool{session: p.upstream, spec: agentsafe.ToolSpec{Name: t.Name, Description: t.Description, Parameters: schema}}
+	base := upstreamTool{session: session, spec: agentsafe.ToolSpec{Name: t.Name, Description: t.Description, Parameters: schema}}
 	switch {
 	case policy.Pass:
-		if t.Annotations == nil || !t.Annotations.ReadOnlyHint {
-			p.unprotected = append(p.unprotected, t.Name)
-		}
-		return &base, nil
+		return &passTool{upstreamTool: base, timeout: time.Duration(policy.Timeout)}, nil
 	case policy.Approval == "always":
 		return &gatedTool{keyedTool{upstreamTool: base, policy: policy}}, nil
 	default:
@@ -108,11 +121,11 @@ func (p *Proxy) adopt(t *sdk.Tool, policies map[string]Policy) (agentsafe.Tool, 
 }
 
 // Hidden are the upstream's tools that have no policy, and so aren't exposed to the agent.
-func (p *Proxy) Hidden() []string { return p.hidden }
+func (p *Proxy) Hidden() []string { return slices.Clone(p.hidden) }
 
 // Unprotected are the tools passed through ("pass": true) that the upstream doesn't mark read-only: each call
 // is logged, but nothing stops a repeat or asks anyone first. Worth a warning at startup.
-func (p *Proxy) Unprotected() []string { return p.unprotected }
+func (p *Proxy) Unprotected() []string { return slices.Clone(p.unprotected) }
 
 // Close stops the proxy taking calls. It doesn't close the upstream session: whoever opened it does.
 func (p *Proxy) Close() error { return p.gateway.Close() }
@@ -238,3 +251,12 @@ func (t *upstreamTool) Spec() agentsafe.ToolSpec { return t.spec }
 func (t *upstreamTool) Call(ctx context.Context, args json.RawMessage) (any, error) {
 	return t.session.CallTool(ctx, &sdk.CallToolParams{Name: t.spec.Name, Arguments: args, Meta: upstreamMeta(ctx)})
 }
+
+// passTool is a tool passed through ("pass": true), with its policy's timeout.
+type passTool struct {
+	upstreamTool
+	timeout time.Duration
+}
+
+// Timeout is the policy's per-call timeout (agentsafe.TimeoutTool); 0 is the gateway's.
+func (t *passTool) Timeout() time.Duration { return t.timeout }

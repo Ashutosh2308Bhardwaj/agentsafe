@@ -28,21 +28,27 @@ which need a human's approval, and who may give it:
 ```
 
 **Start from what the server says about its tools.** `inspect` lists them without calling any, and writes a
-starting policy that fails closed: read-only tools pass; a write is identified by all its arguments
-(`"identity": ["*"]`), keyed on an argument that looks like an idempotency key if it has one, and waits for approval
-unless the server says it isn't destructive. The annotations are the server's word: read the file before you use it.
+starting policy that fails closed. The server's hints can only make it more careful, because MCP calls them
+untrusted: every write is identified by all its arguments (`"identity": ["*"]`), gets no key and waits for approval;
+a tool marked read-only gets no policy, so it stays hidden until you review it and write `{"pass": true}`.
+`--trust-annotations` lets the hints relax it, for a server you trust: read-only tools pass, and writes marked not
+destructive need no approval.
+
+No tool gets a key, even one with an argument named `request_id` or `idempotency_key`: a key lets agentsafe retry an
+outcome it lost, which is safe only if the server deduplicates on it, and a name doesn't prove that. `inspect`
+reports it as a **candidate key**; `verify` with `"key": "argument"` checks it, and only then do you switch to it.
 
 ```bash
 agentsafe-mcp inspect --policy-out policy.json -- npx -y @modelcontextprotocol/server-filesystem ./data
 ```
 
 ```
-secure-filesystem-server 0.2.0: 14 tools, 10 read-only, 4 that change something (0 with a key argument); 14 annotated.
+secure-filesystem-server 0.2.0: 14 tools, 10 read-only, 4 that change something (0 with a candidate key); 14 annotated.
 
-TOOL              KIND                KEY ARGUMENT  SUGGESTED POLICY
-read_file         read                -             pass
-write_file        write, destructive  -             all arguments; no key (not retry-safe); approval
-create_directory  write               -             all arguments; no key (not retry-safe)
+TOOL              KIND                CANDIDATE KEY  SUGGESTED POLICY
+read_file         read                -              hidden until reviewed
+write_file        write, destructive  -              all arguments; no key (not retry-safe); approval
+create_directory  write               -              all arguments; no key (not retry-safe); approval
 ...
 ```
 
@@ -87,7 +93,8 @@ With a policy for a tool:
   `TestKilledAfterTheUpstreamChargedThenRestarted` kills the proxy right after the server charged: one
   charge in every mode, two without a policy.
 - **`key: meta` or `argument` is your claim that the server deduplicates on the key**: agentsafe-mcp can't know. Check
-  it against a **sandbox** of the server, calling the tool the way the proxy does. Every tool, keyed or not: one call
+  it against a **sandbox** of the server, calling the tool exactly as the proxy does (the same code builds both, so
+  a keyed call carries a fresh key, and arguments the proxy would refuse are refused before any call). Every tool, keyed or not: one call
   makes exactly one effect (two means the server repeats the action inside one call, which no proxy can stop). With a
   key: one call with a new key (one effect), then 20 at once with one key (still one effect, one answer). Without a
   key, verify reports the tool as not retry-safe: after a crash its outcome is recorded as unknown, never retried.
@@ -98,7 +105,8 @@ With a policy for a tool:
   ```
 
   `--count` is any shell command printing how many effects exist (a `count(*)`, `curl … | jq length`). It makes real
-  calls, so it won't run without `--sandbox`; `--json` prints the verdict. From Go: `mcptest.OneEffect`, `mcptest.SameKey`. It catches a server that ignores the key,
+  calls, so it won't run without `--sandbox`; `--json` prints the verdict; `--timeout` (default 5m) ends a run whose
+  server or `--count` hangs. From Go: `mcptest.OneEffect`, `mcptest.SameKey`. It catches a server that ignores the key,
   and one that checks and then acts without a lock **when there's a real gap between the two** (a database read, then
   a payment API call): a race only microseconds wide can pass. A pass is strong evidence, not proof.
 - A policy that protects a tool needs `identity` (or it's `pass`): the fields that make a call one operation, or

@@ -19,12 +19,14 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// verify checks a tool against a sandbox of its server, as its policy uses it. Every tool: one call makes exactly
+// verify checks a tool against a sandbox of its server, called exactly as the proxy calls it under its policy
+// (the same code builds both, with a fresh key where the policy sends one). Every tool: one call makes exactly
 // one effect (mcptest.CheckOneEffect); two means the server repeats it inside one call, which no proxy can stop.
 // A policy that sends a key: the server really deduplicates on it, one call after another and 20 at once
 // (mcptest.CheckSameKey). Without a key the tool isn't retry-safe, which verify reports: after a crash agentsafe
 // records the outcome as unknown and never retries it. Effects are counted by --count, a shell command that
-// prints a number. It makes real calls with real effects, so it refuses to run without --sandbox.
+// prints a number. It makes real calls with real effects, so it refuses to run without --sandbox. --timeout bounds
+// the whole run, the server's calls and the counts.
 func verify(args []string) error {
 	v, err := parseVerify(args)
 	if err != nil {
@@ -38,7 +40,8 @@ func verify(args []string) error {
 	if !ok {
 		return fmt.Errorf("%s has no policy in %s", v.tool, v.policy)
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), v.timeout)
+	defer cancel()
 	upstream, err := startUpstream(ctx, v.upstream)
 	if err != nil {
 		return err
@@ -54,13 +57,14 @@ func verify(args []string) error {
 		}
 		return n
 	}
-	if policy.Key != mcp.KeyNone && !policy.Pass {
-		// The policy is checked against the tool before any call: a wrong one mustn't cost a real effect.
-		if _, err := mcp.KeyedTool(ctx, upstream, v.tool, policy); err != nil {
-			return err
-		}
+	// The policy is checked against the tool before any call: a wrong one mustn't cost a real effect.
+	if _, err := mcp.ProxiedTool(ctx, upstream, v.tool, policy); err != nil {
+		return err
 	}
 	r := check(ctx, upstream, v, policy, effects)
+	if ctx.Err() != nil {
+		return fmt.Errorf("verify gave up after %s (--timeout): the server or --count didn't answer: %w", v.timeout, ctx.Err())
+	}
 	if countErr != nil {
 		return fmt.Errorf("counting effects: %w", countErr)
 	}
@@ -82,7 +86,7 @@ func check(ctx context.Context, upstream *sdk.ClientSession, v verifyArgs, polic
 	if policy.Pass {
 		r.Key = "pass"
 	}
-	if err := mcptest.CheckOneEffect(ctx, upstream, v.tool, json.RawMessage(v.args), effects); err != nil {
+	if err := mcptest.CheckOneEffect(ctx, upstream, v.tool, policy, json.RawMessage(v.args), effects); err != nil {
 		r.OneEffect, r.Detail = "fail", err.Error()
 		return r
 	}
@@ -128,7 +132,7 @@ func report(r verdict, asJSON bool) error {
 type verifyArgs struct {
 	policy, tool, args, count string
 	json                      bool
-	settle                    time.Duration
+	settle, timeout           time.Duration
 	upstream                  []string
 }
 
@@ -141,9 +145,10 @@ func parseVerify(args []string) (verifyArgs, error) {
 	fs.StringVar(&v.count, "count", "", "shell command printing how many effects exist so far, e.g. a SELECT count(*) (required)")
 	fs.BoolVar(&v.json, "json", false, "print the verdict as JSON")
 	fs.DurationVar(&v.settle, "settle", 0, "wait this long before each count, for an API whose lists lag its writes")
+	fs.DurationVar(&v.timeout, "timeout", 5*time.Minute, "give up on the whole run after this long (a server or --count that hangs)")
 	sandbox := fs.Bool("sandbox", false, "confirm the server is a sandbox: verify makes real calls, with real effects")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox [--json] -- COMMAND [ARGS...]")
+		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox [--json] [--settle D] [--timeout D] -- COMMAND [ARGS...]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -168,7 +173,9 @@ func runCount(ctx context.Context, command string) (int, error) {
 	if runtime.GOOS == "windows" {
 		shell, flagC = "cmd", "/C"
 	}
-	out, err := exec.CommandContext(ctx, shell, flagC, command).Output() //nolint:gosec // the operator's own command
+	cmd := exec.CommandContext(ctx, shell, flagC, command) //nolint:gosec // the operator's own command
+	cmd.WaitDelay = time.Second                            // a child the shell started can hold the output open after the shell is killed
+	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("%q: %w", command, err)
 	}
