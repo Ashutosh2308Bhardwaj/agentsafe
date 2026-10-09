@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="24 popular MCP servers, 489 tools: none of the 266 that change something takes an idempotency key.">
+<title>MCP Retry Scan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+/* Layout: a test-report sheet. One reading column, wider panels for the evidence, a ledger of servers. */
+:root {
+  --paper: #f1f3f5;
+  --sheet: #fbfcfd;
+  --ink: #121a22;
+  --muted: #56626e;
+  --rule: #d3d9df;
+  --well: #e6eaee;
+  --signal: #b8321b;
+  --signal-soft: #f6dcd5;
+  --accent: #1d4ccf;
+  --accent-soft: #dbe3fa;
+  --bar: #9aa6b2;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0d1217; --sheet: #121920; --ink: #e3e8ed; --muted: #8b97a3; --rule: #26313b; --well: #18212a;
+    --signal: #ff7b5f; --signal-soft: #3a1d17; --accent: #8fa8ff; --accent-soft: #1c2747; --bar: #4b5866;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0d1217; --sheet: #121920; --ink: #e3e8ed; --muted: #8b97a3; --rule: #26313b; --well: #18212a;
+  --signal: #ff7b5f; --signal-soft: #3a1d17; --accent: #8fa8ff; --accent-soft: #1c2747; --bar: #4b5866;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 17px; line-height: 1.6; }
+.page { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; display: grid; gap: 56px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.1; }
+h2 { font-size: 1.6rem; font-weight: 800; font-stretch: 88%; letter-spacing: -0.01em; }
+h3 { font-size: 1.1rem; font-weight: 700; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, pre, .mono { font-family: var(--mono); font-size: 0.86em; }
+.eyebrow { font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+section { display: grid; gap: 18px; }
+.prose { display: grid; gap: 14px; }
+
+/* The thesis */
+header { display: grid; gap: 18px; }
+.zero { font-family: var(--display); font-weight: 900; font-stretch: 72%; font-size: clamp(4.5rem, 16vw, 10rem); line-height: 0.85; letter-spacing: -0.03em; }
+.zero em { font-style: normal; color: var(--signal); }
+.lede { font-size: 1.25rem; line-height: 1.5; max-width: 640px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.stat { background: var(--sheet); padding: 16px; display: grid; gap: 2px; align-content: start; }
+.stat b { font-family: var(--display); font-weight: 800; font-stretch: 80%; font-size: 2.2rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 0.86rem; color: var(--muted); line-height: 1.35; }
+.stat.hot b { color: var(--signal); }
+
+/* The retry, side by side */
+.runs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.run { background: var(--sheet); border: 1px solid var(--rule); display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
+.run-head { padding: 12px 16px; border-bottom: 1px solid var(--rule); font-family: var(--display); font-weight: 700; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.run pre { margin: 0; padding: 14px 16px; overflow-x: auto; line-height: 1.7; background: var(--well); }
+.run .dim { color: var(--muted); }
+.run .rep { color: var(--accent); }
+.run-foot { padding: 12px 16px; display: flex; align-items: baseline; gap: 10px; }
+.count { font-family: var(--display); font-weight: 900; font-stretch: 75%; font-size: 2rem; line-height: 1; }
+.bad .count { color: var(--signal); }
+.good .count { color: var(--accent); }
+.tag { font-family: var(--mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em; }
+.bad .tag { background: var(--signal-soft); color: var(--signal); }
+.good .tag { background: var(--accent-soft); color: var(--accent); }
+
+/* The ledger */
+.ledger-wrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+th { font-family: var(--mono); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+td .who { display: block; color: var(--muted); font-size: 0.8rem; }
+td .ver { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); max-width: 120px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.bars { width: 240px; }
+.track { position: relative; height: 12px; background: var(--well); }
+.track i { position: absolute; inset: 0 auto 0 0; background: var(--bar); }
+.track i.w { background: var(--ink); }
+td.zero-key { color: var(--signal); font-weight: 600; }
+tr.total td { font-weight: 700; border-bottom: none; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; background: var(--bar); }
+.legend span.w::before { background: var(--ink); }
+
+/* Findings */
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; }
+.finding { display: grid; gap: 8px; align-content: start; border-top: 2px solid var(--ink); padding-top: 12px; min-width: 0; }
+.finding p { font-size: 0.97rem; }
+
+pre.cmd { margin: 0; padding: 16px; background: var(--well); border: 1px solid var(--rule); overflow-x: auto; line-height: 1.6; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
+footer { border-top: 1px solid var(--rule); padding-top: 18px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 520px) { body { font-size: 16px; } .lede { font-size: 1.1rem; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">MCP server scan · 9 October 2026</div>
+    <div class="zero"><em>0</em> of 266</div>
+    <p class="lede">tools that may change something, across 24 popular MCP servers, take an idempotency key. When a call times out, an agent can't retry any of them without risking doing it twice.</p>
+  </header>
+
+  <div class="stats" aria-label="Scan totals">
+    <div class="stat"><b>24</b><span>servers scanned</span></div>
+    <div class="stat"><b>489</b><span>tools listed</span></div>
+    <div class="stat"><b>266</b><span>not marked read-only</span></div>
+    <div class="stat hot"><b>0</b><span>take an idempotency key</span></div>
+    <div class="stat"><b>48</b><span>named like reads, not marked read-only</span></div>
+  </div>
+
+  <section class="col prose">
+    <h2>Why the key matters</h2>
+    <p>A tool call can time out, or the agent's process can die mid-call. Then nobody knows whether the issue was filed, the refund issued, the message sent. Retrying risks doing it twice; giving up risks never doing it.</p>
+    <p>Payment APIs settled this years ago with an <em>idempotency key</em>: the caller sends a key with the request, and the server answers a repeat with the first result instead of acting again. MCP's <code>tools/call</code> has no key field (<a href="https://github.com/modelcontextprotocol/modelcontextprotocol/issues/3394">spec issue #3394</a>), so a server can only offer one as a tool argument. We checked how many do.</p>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <h2>What a retry does, on real GitHub</h2>
+      <p>The same create-issue call, sent twice to GitHub's official MCP server, as a client does when the first answer is lost. Then the same through <a href="https://github.com/Ashutosh2308Bhardwaj/agentsafe/tree/main/mcp">agentsafe-mcp</a>, a proxy that logs each call before forwarding it. Private scratch repository, github-mcp-server v1.14.0.</p>
+    </div>
+    <div class="runs">
+      <div class="run bad">
+        <div class="run-head"><span>Straight to the server</span><span class="tag">duplicate</span></div>
+<pre><span class="dim">call 1:</span> issues/6
+<span class="dim">call 2:</span> issues/7</pre>
+        <div class="run-foot"><span class="count">2</span><span>issues created</span></div>
+      </div>
+      <div class="run good">
+        <div class="run-head"><span>Through agentsafe-mcp</span><span class="tag">replayed</span></div>
+<pre><span class="dim">call 1:</span> issues/8
+<span class="dim">call 2:</span> issues/8  <span class="rep">replayed from the log</span></pre>
+        <div class="run-foot"><span class="count">1</span><span>issue created</span></div>
+      </div>
+    </div>
+    <p class="col">Each of GitHub's write tools we called for real (create issue, comment, create branch, commit a file) made exactly one effect per call: the server doesn't duplicate anything itself. The duplicate comes from the retry, and GitHub's API has no key that could stop it.</p>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <h2>Every server</h2>
+      <p>Tools each server lists, and how many of them aren't marked read-only. The key column is the one that matters.</p>
+    </div>
+    <div class="legend"><span>all tools</span><span class="w">not marked read-only</span></div>
+    <div class="ledger-wrap">
+      <table>
+        <thead><tr><th>Server</th><th>Version</th><th class="bars">Tools</th><th class="n">Tools</th><th class="n">Not read-only</th><th class="n">With a key</th><th class="n">Annotated</th></tr></thead>
+        <tbody id="ledger"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Three things the scan turned up</h2>
+    <div class="findings">
+      <div class="finding">
+        <h3>No keys, anywhere</h3>
+        <p>Names were matched against <code>idempotency_key</code>, <code>request_id</code>, <code>client_token</code> and variants, then every schema was searched by hand for <code>idempot</code>, <code>dedup</code>, <code>nonce</code>, <code>reference</code> and <code>receipt</code>. The only hits were Razorpay's merchant references, which aren't documented as idempotency keys. Often the API underneath has none either (GitHub, Slack, Jira, Notion).</p>
+      </div>
+      <div class="finding">
+        <h3>Hints that don't describe the tools</h3>
+        <p>Razorpay marks all 41 of its tools destructive and not read-only, including 25 <code>fetch_*</code> reads. Nine servers send no annotations at all, so MCP's defaults call every tool a destructive write. A client that asks before destructive calls asks about everything.</p>
+      </div>
+      <div class="finding">
+        <h3>One tool for the whole API</h3>
+        <p>Square's server exposes everything through <code>make_api_request(service, method, request)</code>. Listing customers and charging a card are the same tool, so a rule written per tool (an approval, a rate limit, a key) covers both or neither.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="col prose">
+    <h2>What this does and doesn't show</h2>
+    <ul>
+      <li>It shows what servers declare: their tools, schemas and hints. What they do was checked only for GitHub. A server could deduplicate without saying so, or create two records for one call, as <a href="https://github.com/atlassian/atlassian-mcp-server/issues/132">atlassian-mcp-server#132</a> reports.</li>
+      <li>"Not marked read-only" counts tools a server didn't mark as reads, including tools with no annotations at all. Some are reads in practice: 48 are named like one.</li>
+      <li>Each server ran at <code>@latest</code> with dummy credentials, and no tool was called. Tool lists can depend on credentials and flags; GitHub's ran with <code>--toolsets all</code>.</li>
+      <li>Not scanned: Stripe (its package forwards to a hosted server that won't list tools without a real key), Twilio and Google Drive (wouldn't start without real credentials), and hosted-only servers such as Atlassian's and Linear's official ones. The Atlassian and Linear servers here are community ones; four MCP reference servers are archived.</li>
+    </ul>
+  </section>
+
+  <section class="col prose">
+    <h2>Run it yourself</h2>
+    <p>Needs Go, Node and uv. <code>run.sh</code> downloads and runs each server's code on your machine and calls none of its tools.</p>
+<pre class="cmd">git clone https://github.com/Ashutosh2308Bhardwaj/agentsafe
+cd agentsafe/mcp/scan
+./run.sh                 # inspects every server in servers.tsv, writes RESULTS.md
+SANDBOX=you/scratch-repo AGENTSAFE_SANDBOX_GITHUB_TOKEN=... ./retry-github.sh</pre>
+    <p>The server list, every result and the method are in <a href="https://github.com/Ashutosh2308Bhardwaj/agentsafe/tree/main/mcp/scan">mcp/scan</a>. A server missing from the list is a pull request away.</p>
+  </section>
+
+  <section class="col prose">
+    <h2>If you run agents against these servers</h2>
+    <p>Something between the agent and the server has to remember what was already done. <a href="https://github.com/Ashutosh2308Bhardwaj/agentsafe/tree/main/mcp">agentsafe-mcp</a> is one way: it logs each call before forwarding it, answers an exact repeat from that log, and when a call's outcome is lost to a crash or timeout it records it as unknown and never retries it blindly. It starts from a policy that <code>agentsafe-mcp inspect</code> writes for any server above.</p>
+  </section>
+
+  <footer>Scan by <a href="https://github.com/Ashutosh2308Bhardwaj/agentsafe">agentsafe</a>, Apache-2.0. Data as of 9 October 2026.</footer>
+</div>
+
+<script>
+const rows = [["atlassian","community (sooperset/mcp-atlassian)","3.4.8",98,40,0,98],["github","GitHub","v1.14.0",91,34,0,91],["razorpay","Razorpay","1.0.0",41,41,0,41],["heroku","Heroku","1.2.11",33,33,0,0],["supabase","Supabase","0.13.0",29,11,0,29],["mongodb","MongoDB","3.0.5",27,9,0,27],["playwright","Microsoft","1.64.0-alpha",25,18,0,25],["notion","Notion","1.0.0",24,12,0,24],["hubspot","HubSpot","0.4.0",21,7,0,21],["everything","MCP reference (test server)","2.0.0",14,4,0,14],["filesystem","MCP reference","0.2.0",14,4,0,14],["git","MCP reference","1.30.0",12,5,0,12],["gitlab","MCP reference (archived)","0.5.1",9,9,0,0],["memory","MCP reference","0.6.3",9,6,0,9],["sentry","Sentry","0.42.0",9,3,0,9],["slack","MCP reference (archived)","1.0.0",8,8,0,0],["puppeteer","MCP reference (archived)","0.1.0",7,7,0,0],["linear","community (linear-mcp-server)","1.0.0",5,5,0,0],["shopify","Shopify (developer docs)","1.16.0",5,5,0,0],["square","Square","1.0.0",3,3,0,0],["time","MCP reference","1.30.0",2,0,0,2],["fetch","MCP reference","1.30.0",1,1,0,0],["postgres","MCP reference (archived)","0.1.0",1,1,0,0],["sequential","MCP reference","2026.8.31",1,0,0,1]];
+const max = Math.max(...rows.map(r => r[3]));
+const body = document.getElementById("ledger");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let t = [0, 0, 0, 0];
+for (const [id, who, ver, tools, writes, keyed, ann] of rows) {
+  t[0] += tools; t[1] += writes; t[2] += keyed; t[3] += ann;
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><span class="mono">${esc(id)}</span><span class="who">${esc(who)}</span></td>` +
+    `<td><span class="ver" title="${esc(ver)}">${esc(ver)}</span></td>` +
+    `<td class="bars"><div class="track" role="img" aria-label="${tools} tools, ${writes} not read-only">` +
+    `<i style="width:${(tools / max * 100).toFixed(1)}%"></i><i class="w" style="width:${(writes / max * 100).toFixed(1)}%"></i></div></td>` +
+    `<td class="n">${tools}</td><td class="n">${writes}</td><td class="n zero-key">${keyed}</td><td class="n">${ann}</td>`;
+  body.appendChild(tr);
+}
+const total = document.createElement("tr");
+total.className = "total";
+total.innerHTML = `<td>Total</td><td></td><td></td><td class="n">${t[0]}</td><td class="n">${t[1]}</td><td class="n zero-key">${t[2]}</td><td class="n">${t[3]}</td>`;
+body.appendChild(total);
+</script>
+</body>
+</html>

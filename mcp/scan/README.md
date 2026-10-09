@@ -7,7 +7,7 @@ key in `tools/call` ([spec issue #3394](https://github.com/modelcontextprotocol/
 so a server can only offer one as a tool argument.
 
 This directory checks how many popular MCP servers do. [RESULTS.md](RESULTS.md) has the numbers; `run.sh`
-reproduces them.
+reproduces them. The findings as a page: https://ashutosh2308bhardwaj.github.io/agentsafe/mcp-retry-scan.html
 
 ## Method
 
