@@ -42,6 +42,28 @@ The numbers are in [RESULTS.md](RESULTS.md); in short:
    `make_api_request(service, method, request)`: listing customers and charging a card are the same tool, so any
    per-tool rule (approval, rate limit, key) applies to both or neither.
 
+## Checked for real: GitHub
+
+Declared isn't done, so GitHub's server was also checked against a private scratch repository
+(`verify-github.sh`, `results/github-verify.jsonl`): `agentsafe-mcp verify` made one real call to each of
+`issue_write` (create), `add_issue_comment`, `create_branch` and `create_or_update_file`, and counted the effect
+through GitHub's API before and after. **Each made exactly one effect per call**: no duplicate inside the server.
+None is retry-safe: GitHub's API has no idempotency key.
+
+What that means for a retry (`retry-github.sh`, `results/github-retry.txt`): the same create-issue call sent twice,
+as a client does when the first answer is lost to a timeout.
+
+```
+== directly to GitHub's MCP server
+call 1: .../agentsafe-sandbox/issues/6
+call 2: .../agentsafe-sandbox/issues/7          a second issue
+issues created: 2
+== through agentsafe-mcp
+call 1: .../agentsafe-sandbox/issues/8
+call 2: replayed=true .../agentsafe-sandbox/issues/8   the first answer, from agentsafe's log
+issues created: 1
+```
+
 ## What this does and doesn't show
 
 - It shows what servers **declare**. It doesn't show what they **do**: a server could deduplicate without saying

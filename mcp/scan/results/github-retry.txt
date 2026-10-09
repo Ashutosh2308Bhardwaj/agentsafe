@@ -1,0 +1,9 @@
+# retry-github.sh against a private scratch repository, 2026-10-09, github-mcp-server v1.14.0
+== directly to GitHub's MCP server
+call 1: isError=false replayed=false {"id":"5775675469","url":"https://github.com/Ashutosh2308Bhardwaj/agentsafe-sandbox/issues/6"}
+call 2: isError=false replayed=false {"id":"5775675620","url":"https://github.com/Ashutosh2308Bhardwaj/agentsafe-sandbox/issues/7"}
+issues created: 2
+== through agentsafe-mcp
+call 1: isError=false replayed=false {"id":"5775678425","url":"https://github.com/Ashutosh2308Bhardwaj/agentsafe-sandbox/issues/8"}
+call 2: isError=false replayed=true {"id":"5775678425","url":"https://github.com/Ashutosh2308Bhardwaj/agentsafe-sandbox/issues/8"}
+issues created: 1

@@ -1,0 +1,4 @@
+{"tool":"issue_write","key":"none","one_effect":"pass","same_key":"skipped","retry_safe":false,"detail":"no key: after a crash or timeout agentsafe records the outcome as unknown and never retries it"}
+{"tool":"add_issue_comment","key":"none","one_effect":"pass","same_key":"skipped","retry_safe":false,"detail":"no key: after a crash or timeout agentsafe records the outcome as unknown and never retries it"}
+{"tool":"create_branch","key":"none","one_effect":"pass","same_key":"skipped","retry_safe":false,"detail":"no key: after a crash or timeout agentsafe records the outcome as unknown and never retries it"}
+{"tool":"create_or_update_file","key":"none","one_effect":"pass","same_key":"skipped","retry_safe":false,"detail":"no key: after a crash or timeout agentsafe records the outcome as unknown and never retries it"}
