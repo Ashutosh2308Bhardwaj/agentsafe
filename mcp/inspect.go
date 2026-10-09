@@ -30,11 +30,10 @@ type ToolSummary struct {
 	// KeyArgument is an argument that looks like an idempotency key (idempotency_key, request_id, client_token...):
 	// a server that deduplicates on it lets agentsafe retry safely. A name is a hint, not proof: run verify.
 	KeyArgument string `json:"key_argument,omitempty"`
-	// Required are the arguments the schema requires: the starting guess for the operation's identity.
+	// Required are the arguments the schema requires: often, not always, what identifies an operation.
 	Required []string `json:"required,omitempty"`
-	// Policy is the suggested starting policy, nil when none can be guessed (a write with no required arguments:
-	// its identity has to be written by hand). It stays a suggestion: read it before you use it.
-	Policy *Policy `json:"policy,omitempty"`
+	// Policy is the suggested starting policy. It stays a suggestion: read it before you use it.
+	Policy *Policy `json:"policy"`
 	Note   string  `json:"note,omitempty"`
 }
 
@@ -45,9 +44,13 @@ var keyNames = []string{"idempotencykey", "idempotencytoken", "requestid", "clie
 // Inspect lists the upstream's tools and, for each, what it says about itself and a starting policy. It calls no
 // tool, so it's safe against any server.
 //
-// The suggestion fails closed: a read-only tool passes; a write is keyed on its required arguments (and on its
-// key argument, if it has one) and waits for approval if it may be destructive, as MCP assumes unless told
-// otherwise; a write with no required arguments gets no policy, and stays hidden until someone writes one.
+// The suggestion fails closed: a read-only tool passes; a write is identified by all its arguments (identity
+// ["*"]), keyed on its key argument if it has one, and waits for approval if it may be destructive, as MCP
+// assumes unless told otherwise. All arguments, not the required ones, because a schema can't say what makes a
+// call one operation: required arguments can be too few (a generic make_api_request(service, method, request)
+// would make every payment the same operation, refusing the second). With all of them an exact repeat is
+// answered from the log and nothing legitimate is refused; naming the identity fields by hand adds conflict
+// detection (the same ticket with a new amount).
 func Inspect(ctx context.Context, upstream *sdk.ClientSession) (Inspection, error) {
 	var in Inspection
 	if r := upstream.InitializeResult(); r != nil && r.ServerInfo != nil {
@@ -84,11 +87,7 @@ func summarize(t *sdk.Tool) ToolSummary {
 			s.Required = append(s.Required, r)
 		}
 	}
-	if len(s.Required) == 0 {
-		s.Note = "a write with no required arguments: write its identity by hand (it stays hidden until then)"
-		return s
-	}
-	p := &Policy{Identity: s.Required, Key: KeyNone}
+	p := &Policy{Identity: []string{AllArguments}, Key: KeyNone}
 	if s.KeyArgument != "" {
 		p.Key, p.KeyArgument = KeyArgument, s.KeyArgument
 		s.Note = "has a key argument: confirm the server deduplicates on it (agentsafe-mcp verify)"

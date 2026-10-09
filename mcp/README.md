@@ -28,10 +28,9 @@ which need a human's approval, and who may give it:
 ```
 
 **Start from what the server says about its tools.** `inspect` lists them without calling any, and writes a
-starting policy that fails closed: read-only tools pass; a write is keyed on its required arguments (and on an
-argument that looks like an idempotency key, if it has one); a write the server doesn't mark non-destructive waits
-for approval; a write with no required arguments gets no policy and stays hidden. The annotations are the server's
-word and identity is a guess: read the file before you use it.
+starting policy that fails closed: read-only tools pass; a write is identified by all its arguments
+(`"identity": ["*"]`), keyed on an argument that looks like an idempotency key if it has one, and waits for approval
+unless the server says it isn't destructive. The annotations are the server's word: read the file before you use it.
 
 ```bash
 agentsafe-mcp inspect --policy-out policy.json -- npx -y @modelcontextprotocol/server-filesystem ./data
@@ -42,12 +41,15 @@ secure-filesystem-server 0.2.0: 14 tools, 10 read-only, 4 that change something 
 
 TOOL              KIND                KEY ARGUMENT  SUGGESTED POLICY
 read_file         read                -             pass
-write_file        write, destructive  -             identity content,path; no key (not retry-safe); approval
-create_directory  write               -             identity path; no key (not retry-safe)
+write_file        write, destructive  -             all arguments; no key (not retry-safe); approval
+create_directory  write               -             all arguments; no key (not retry-safe)
 ...
 ```
 
-`--json` prints the inspection; from Go, `mcp.Inspect`.
+Why all arguments: what makes two calls one operation is knowledge about your domain, and a schema doesn't carry it.
+With `["*"]` an exact repeat is answered from the log and any difference is a new operation, so nothing legitimate
+is ever refused. Name the fields yourself (`["ticket_id"]`) to also catch the same ticket asked for with a new
+amount, as a conflict. `--json` prints the inspection; from Go, `mcp.Inspect`.
 
 ## What it does, and what it doesn't
 
@@ -99,8 +101,8 @@ With a policy for a tool:
   calls, so it won't run without `--sandbox`; `--json` prints the verdict. From Go: `mcptest.OneEffect`, `mcptest.SameKey`. It catches a server that ignores the key,
   and one that checks and then acts without a lock **when there's a real gap between the two** (a database read, then
   a payment API call): a race only microseconds wide can pass. A pass is strong evidence, not proof.
-- A policy that protects a tool needs `identity` (or it's `pass`): without it every call would be the same
-  operation. A call missing an identity field is refused before it's forwarded. Policies are checked against the
+- A policy that protects a tool needs `identity` (or it's `pass`): the fields that make a call one operation, or
+  `["*"]` for all its arguments. Without it every call would be the same operation. A call missing an identity field is refused before it's forwarded. Policies are checked against the
   server's real tools at startup: a misspelt tool or argument fails loudly instead of leaving a tool bare.
 
 With `approval: always`:

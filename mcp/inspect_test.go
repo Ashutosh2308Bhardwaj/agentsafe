@@ -57,9 +57,8 @@ func shopSession(t *testing.T) *sdk.ClientSession {
 	return cs
 }
 
-// Each tool, as it describes itself, and the policy that follows: reads pass; writes are keyed on their
-// required arguments, on a key argument if they have one, and gated unless the server says they're not
-// destructive; a write with nothing to identify it gets no policy.
+// Each tool, as it describes itself, and the policy that follows: reads pass; writes are identified by all their
+// arguments, keyed on a key argument if they have one, and gated unless the server says they're not destructive.
 func TestInspectSuggestsAPolicyPerTool(t *testing.T) {
 	in, err := mcp.Inspect(context.Background(), shopSession(t))
 	if err != nil {
@@ -72,18 +71,28 @@ func TestInspectSuggestsAPolicyPerTool(t *testing.T) {
 	for _, s := range in.Tools {
 		got[s.Name] = s
 	}
+	all := []string{mcp.AllArguments}
 	want := map[string]*mcp.Policy{
 		"get_order":      {Pass: true},
-		"create_refund":  {Identity: []string{"amount", "order_id"}, Key: mcp.KeyArgument, KeyArgument: "Idempotency-Key", Approval: "always"},
-		"send_message":   {Identity: []string{"channel", "text"}, Key: mcp.KeyNone},
-		"update_address": {Identity: []string{"order_id"}, Key: mcp.KeyArgument, KeyArgument: "request_id"},
-		"delete_order":   {Identity: []string{"order_id"}, Key: mcp.KeyNone, Approval: "always"},
-		"clear_cache":    nil,
+		"create_refund":  {Identity: all, Key: mcp.KeyArgument, KeyArgument: "Idempotency-Key", Approval: "always"},
+		"send_message":   {Identity: all, Key: mcp.KeyNone},
+		"update_address": {Identity: all, Key: mcp.KeyArgument, KeyArgument: "request_id"},
+		"delete_order":   {Identity: all, Key: mcp.KeyNone, Approval: "always"},
+		"clear_cache":    {Identity: all, Key: mcp.KeyNone, Approval: "always"},
 	}
 	for name, p := range want {
 		if !reflect.DeepEqual(got[name].Policy, p) {
 			t.Errorf("%s: policy %+v, want %+v", name, got[name].Policy, p)
 		}
+	}
+	checkHints(t, got)
+}
+
+// checkHints: the hints as the server sent them, MCP's defaults where it sent none, and the required arguments.
+func checkHints(t *testing.T, got map[string]mcp.ToolSummary) {
+	t.Helper()
+	if s := got["create_refund"]; !reflect.DeepEqual(s.Required, []string{"amount", "order_id"}) {
+		t.Errorf("required arguments, the key argument aside, are reported: %v", s.Required)
 	}
 	if s := got["create_refund"]; !s.Write || s.Annotated || !s.Destructive {
 		t.Errorf("no annotations: MCP's defaults, a destructive write: %+v", s)
@@ -96,7 +105,7 @@ func TestInspectSuggestsAPolicyPerTool(t *testing.T) {
 	}
 }
 
-// The starter policy file is usable as it is: it loads, and a proxy opens on it, exposing the tools it covers.
+// The starter policy file is usable as it is: it loads, and a proxy opens on it, exposing every tool.
 func TestTheStarterPolicyOpensAProxy(t *testing.T) {
 	ctx := context.Background()
 	up := shopSession(t)
@@ -121,8 +130,8 @@ func TestTheStarterPolicyOpensAProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the starter must open a proxy: %v\n%s", err, raw)
 	}
-	if h := p.Hidden(); !reflect.DeepEqual(h, []string{"clear_cache"}) {
-		t.Fatalf("only the tool without a suggestion stays hidden: %v", h)
+	if h := p.Hidden(); len(h) != 0 {
+		t.Fatalf("every tool has a suggestion: %v", h)
 	}
 }
 

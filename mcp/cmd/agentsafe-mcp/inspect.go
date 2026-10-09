@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
 )
@@ -19,6 +20,7 @@ func inspect(args []string) error {
 	fs := flag.NewFlagSet("agentsafe-mcp inspect", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the inspection as JSON")
 	out := fs.String("policy-out", "", "write a starting policy file here (it must not exist yet)")
+	timeout := fs.Duration("timeout", time.Minute, "give up on a server that hasn't listed its tools by then")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp inspect [--json] [--policy-out FILE] -- COMMAND [ARGS...]")
 		fs.PrintDefaults()
@@ -30,7 +32,8 @@ func inspect(args []string) error {
 		fs.Usage()
 		return errors.New("the upstream command is required")
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
 	upstream, err := startUpstream(ctx, fs.Args())
 	if err != nil {
 		return err
@@ -55,8 +58,9 @@ func inspect(args []string) error {
 	}
 	printInspection(in)
 	if *out != "" {
-		fmt.Printf("\nWrote %s. Read it before you use it: identity is a guess from the required arguments, and a key "+
-			"argument is only safe if the server deduplicates on it (agentsafe-mcp verify).\n", *out)
+		fmt.Printf("\nWrote %s. Read it before you use it: identity [\"*\"] (all arguments) never refuses a call but sees no "+
+			"conflicts: name the fields that identify an operation where you know them. A key argument is only safe if "+
+			"the server deduplicates on it (agentsafe-mcp verify).\n", *out)
 	}
 	return nil
 }
@@ -116,13 +120,13 @@ func printInspection(in mcp.Inspection) {
 
 // describe is a policy in a few words.
 func describe(p *mcp.Policy) string {
-	if p == nil {
-		return "none: stays hidden (write identity by hand)"
-	}
 	if p.Pass {
 		return "pass"
 	}
 	parts := []string{"identity " + strings.Join(p.Identity, ",")}
+	if len(p.Identity) == 1 && p.Identity[0] == mcp.AllArguments {
+		parts[0] = "all arguments"
+	}
 	if p.Key == mcp.KeyArgument {
 		parts = append(parts, "key → "+p.KeyArgument)
 	} else {

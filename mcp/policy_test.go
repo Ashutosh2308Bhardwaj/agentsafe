@@ -129,3 +129,28 @@ func TestAPolicyThatProtectsAToolNeedsAnIdentity(t *testing.T) {
 		}
 	}
 }
+
+// identity ["*"]: every argument is the operation. A different call is a new operation, never a conflict; an exact
+// repeat is answered from the log; the key argument the model sent is part of neither.
+func TestIdentityAllArguments(t *testing.T) {
+	up := &fakeUpstream{}
+	all := map[string]mcp.Policy{"charge": {Identity: []string{mcp.AllArguments}, Key: mcp.KeyArgument, KeyArgument: "idempotency_key"}}
+	r := newPolicyRig(t, filepath.Join(t.TempDir(), "p.jsonl"), up, all)
+	first := r.call(t, "charge", `{"ticket_id":"T-1","amount":"10.00"}`)
+	other := r.call(t, "charge", `{"ticket_id":"T-1","amount":"12.00"}`)
+	again := r.call(t, "charge", `{"amount":"10.00","ticket_id":"T-1","idempotency_key":"made-up"}`)
+	if first.IsError || other.IsError || up.charges != 2 {
+		t.Fatalf("two different calls are two operations: charges=%d %q %q", up.charges, resultText(first), resultText(other))
+	}
+	if resultText(again) != resultText(first) || again.Meta[mcp.MetaPrefix+"replayed"] != true || len(up.keys) != 2 {
+		t.Fatalf("an exact repeat (the model's key aside) is answered from the log: %q %v requests=%d", resultText(again), again.Meta, len(up.keys))
+	}
+	_, err := openWith(t, passRest(map[string]mcp.Policy{"charge": {Identity: []string{"*", "ticket_id"}}}))
+	if !errors.Is(err, agentsafe.ErrConfig) {
+		t.Fatalf(`["*"] combined with a name must be refused: %v`, err)
+	}
+	if _, err := openWith(t, passRest(map[string]mcp.Policy{"charge": {Identity: []string{"*"}, Approval: "always"}})); err != nil &&
+		!strings.Contains(err.Error(), "nobody may give it") {
+		t.Fatalf(`["*"] is a valid identity: %v`, err)
+	}
+}

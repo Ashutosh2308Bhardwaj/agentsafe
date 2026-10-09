@@ -38,7 +38,9 @@ type Policy struct {
 	// reads and for tools whose effects don't matter; it can't be combined with the fields below.
 	Pass bool `json:"pass,omitempty"`
 	// Identity names the arguments that make a call one operation: they're hashed into its key. A refund's
-	// might be ticket_id and charge_id. Required unless Pass. The other arguments are its payload: the same operation with a
+	// might be ticket_id and charge_id. Required unless Pass. ["*"] is every argument the call has (AllArguments):
+	// an exact repeat is answered from the log and any difference is a new operation, so it never refuses a
+	// call, but it can't see a conflict (the same ticket with a new amount) either: name the fields for that. The other arguments are its payload: the same operation with a
 	// different payload is a conflict, never a second effect.
 	Identity []string `json:"identity,omitempty"`
 	// Key is how the key reaches the upstream: none (the default), meta, or argument.
@@ -51,6 +53,9 @@ type Policy struct {
 	// operation's key) or "never" (the default).
 	Approval string `json:"approval,omitempty"`
 }
+
+// AllArguments is a policy's whole identity (["*"]) when every argument the call has identifies the operation.
+const AllArguments = "*"
 
 // Duration is a time.Duration written as text in a policy file ("10s", "2m").
 type Duration time.Duration
@@ -78,7 +83,11 @@ func (p *Policy) check(t *sdk.Tool) error {
 		return err
 	}
 	props := schemaProperties(t.InputSchema)
-	for _, f := range append(slices.Clone(p.Identity), p.KeyArgument) {
+	identity := p.Identity
+	if p.allArguments() {
+		identity = nil
+	}
+	for _, f := range append(slices.Clone(identity), p.KeyArgument) {
 		if f != "" && props != nil && !props[f] {
 			return fmt.Errorf("the tool has no argument %q", f)
 		}
@@ -93,8 +102,11 @@ func (p *Policy) consistent() error {
 	case p.Pass && (len(p.Identity) > 0 || p.Key != KeyNone || p.KeyArgument != "" || p.Approval == "always"):
 		return errors.New("pass forwards the tool unprotected: it can't have identity, a key or an approval")
 	case !p.Pass && len(p.Identity) == 0:
-		return errors.New("identity is required: the arguments that make a call one operation (a refund's ticket_id). " +
-			"Without them every call would be the same operation. Or \"pass\": true, to forward it unprotected")
+		return errors.New("identity is required: the arguments that make a call one operation (a refund's ticket_id), " +
+			"or [\"*\"] for all of them. Without it every call would be the same operation. Or \"pass\": true, to " +
+			"forward it unprotected")
+	case slices.Contains(p.Identity, AllArguments) && len(p.Identity) > 1:
+		return errors.New(`identity ["*"] is every argument: it can't be combined with names`)
 	}
 	if err := p.keyRules(); err != nil {
 		return err
@@ -140,6 +152,9 @@ func schemaProperties(schema any) map[string]bool {
 	return names
 }
 
+// allArguments: the identity is every argument the call has.
+func (p *Policy) allArguments() bool { return len(p.Identity) == 1 && p.Identity[0] == AllArguments }
+
 // keyedTool is an upstream tool with a policy: an agentsafe.IdempotentTool, so the Gateway gives each call a
 // key, answers repeats from the log, and refuses a changed payload.
 type keyedTool struct {
@@ -155,6 +170,10 @@ func (t *keyedTool) Identity(args json.RawMessage) (any, any, error) {
 	if err := json.Unmarshal(args, &obj); err != nil {
 		return nil, nil, err
 	}
+	delete(obj, t.policy.KeyArgument)
+	if t.policy.allArguments() {
+		return obj, map[string]any{}, nil // all of it is the operation: there's no payload to conflict
+	}
 	identity := map[string]any{}
 	for _, f := range t.policy.Identity {
 		v, ok := obj[f]
@@ -164,7 +183,6 @@ func (t *keyedTool) Identity(args json.RawMessage) (any, any, error) {
 		identity[f] = v
 		delete(obj, f)
 	}
-	delete(obj, t.policy.KeyArgument)
 	return identity, obj, nil
 }
 
