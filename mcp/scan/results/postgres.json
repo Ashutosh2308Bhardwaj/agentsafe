@@ -1,0 +1,1 @@
+{"server":"example-servers/postgres","version":"0.1.0","tools":[{"name":"query","write":true,"annotated":false,"destructive":true,"idempotent":false,"policy":{"identity":["*"],"key":"none","approval":"always"},"note":"no key argument: an outcome lost to a crash or timeout is recorded as unknown, never retried"}]}

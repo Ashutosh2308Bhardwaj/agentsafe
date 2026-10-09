@@ -1,0 +1,1 @@
+{"server":"mcp-fetch","version":"1.30.0","tools":[{"name":"fetch","write":true,"annotated":false,"destructive":true,"idempotent":false,"required":["url"],"policy":{"identity":["*"],"key":"none","approval":"always"},"note":"no key argument: an outcome lost to a crash or timeout is recorded as unknown, never retried"}]}

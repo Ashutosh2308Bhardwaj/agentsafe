@@ -16,3 +16,7 @@ go.work.sum
 mcp/examples/langgraph/bin/
 mcp/examples/langgraph/run/
 .venv/
+# MCP server scan: build output, scratch, logs (results/ and RESULTS.md are committed)
+mcp/scan/bin/
+mcp/scan/work/
+mcp/scan/work-run.log

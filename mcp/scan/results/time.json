@@ -1,0 +1,1 @@
+{"server":"mcp-time","version":"1.30.0","tools":[{"name":"get_current_time","write":false,"annotated":true,"destructive":false,"idempotent":false,"policy":{"pass":true},"note":"read-only, as the server says"},{"name":"convert_time","write":false,"annotated":true,"destructive":false,"idempotent":false,"policy":{"pass":true},"note":"read-only, as the server says"}]}

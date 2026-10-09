@@ -1,0 +1,25 @@
+# id	who maintains it	command (run from this directory; credentials in env.sh are dummies)
+atlassian	community (sooperset/mcp-atlassian)	uvx mcp-atlassian
+everything	MCP reference (test server)	npx -y @modelcontextprotocol/server-everything
+fetch	MCP reference	uvx mcp-server-fetch
+filesystem	MCP reference	npx -y @modelcontextprotocol/server-filesystem ./work/fsroot
+git	MCP reference	uvx mcp-server-git --repository ./work/gitrepo
+github	GitHub	go run github.com/github/github-mcp-server/cmd/github-mcp-server@latest stdio --toolsets all
+gitlab	MCP reference (archived)	npx -y @modelcontextprotocol/server-gitlab
+heroku	Heroku	npx -y @heroku/mcp-server
+hubspot	HubSpot	npx -y @hubspot/mcp-server
+linear	community (linear-mcp-server)	npx -y linear-mcp-server
+memory	MCP reference	npx -y @modelcontextprotocol/server-memory
+mongodb	MongoDB	npx -y mongodb-mcp-server@latest
+notion	Notion	npx -y @notionhq/notion-mcp-server
+playwright	Microsoft	npx -y @playwright/mcp@latest --headless
+postgres	MCP reference (archived)	npx -y @modelcontextprotocol/server-postgres postgresql://127.0.0.1:1/x
+puppeteer	MCP reference (archived)	npx -y @modelcontextprotocol/server-puppeteer
+razorpay	Razorpay	go run github.com/razorpay/razorpay-mcp-server/cmd/razorpay-mcp-server@latest stdio
+sentry	Sentry	npx -y @sentry/mcp-server@latest --access-token=dummy
+sequential	MCP reference	npx -y @modelcontextprotocol/server-sequential-thinking
+shopify	Shopify (developer docs)	npx -y @shopify/dev-mcp@latest
+slack	MCP reference (archived)	npx -y @modelcontextprotocol/server-slack
+square	Square	npx -y square-mcp-server start
+supabase	Supabase	npx -y @supabase/mcp-server-supabase@latest --access-token sbp_dummy
+time	MCP reference	uvx mcp-server-time

@@ -1,0 +1,1 @@
+{"server":"sequential-thinking-server","version":"2026.8.31","tools":[{"name":"sequentialthinking","write":false,"annotated":true,"destructive":false,"idempotent":false,"policy":{"pass":true},"note":"read-only, as the server says"}]}
