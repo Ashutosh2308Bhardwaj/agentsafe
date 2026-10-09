@@ -6,38 +6,47 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
-### Added (`mcp`)
+## [mcp/v0.4.0] - 2026-10-09
 
-- `agentsafe-mcp verify` checks every tool that changes something, not only keyed ones: one call must make exactly
-  one effect (`mcptest.OneEffect` / `CheckOneEffect`). Two effects means the server repeats the action inside a single
-  call, which no proxy can stop; none means `--count` counts the wrong thing. A policy without a key is now accepted
-  and reported as *not retry-safe*; with a key, the key checks follow as before.
-- `"identity": ["*"]` (`mcp.AllArguments`): every argument the call has is the operation. An exact repeat is
-  answered from the log, any difference is a new operation (never a conflict).
-- `agentsafe-mcp inspect` (`mcp.Inspect`): lists a server's tools without calling any (read-only, destructive and
-  idempotent hints, an argument that looks like an idempotency key, required arguments) and suggests a starting
-  policy that fails closed: reads pass, writes get identity `["*"]`, a key argument if they have one, and approval
-  unless the server says they aren't destructive. `--policy-out` writes it as a policy file, never over an existing one; `--json` prints
-  the inspection.
-- `Duration` marshals as text ("10s"), and `Policy` omits empty fields: a policy written by Go loads back.
-- `verify --settle 5s` waits before each count, for an API whose lists lag its writes (GitHub's do): counted at
-  once, an effect looked like none.
-- `verify --json` prints the verdict (`one_effect`, `same_key`, `retry_safe`) for collecting across servers.
+`agentsafe/mcp` only: the core stays at v0.5.0. Released with the [MCP retry scan](mcp/scan/README.md): 24 popular
+MCP servers, 489 tools, none of the 266 that change something takes an idempotency key. **Breaking**: a policy
+that protects a tool must name its `identity` (see below).
 
-### Fixed (`mcp`)
-
-- `LoadConfig` writes out the default key (`none`) for a policy that leaves `key` out. Before, `verify` read the
-  empty value as a key and refused such a policy (found running it against GitHub's server).
+### Changed (breaking)
 
 - **A policy that protects a tool now requires `identity`**, and one without it is refused at startup. Before, a
   policy such as `{}`, `{"key": "none"}` or `{"approval": "never"}` made every call to the tool the same operation:
   the first call ran, and every later one, for any arguments, was refused as a conflict (it failed safe, never
-  twice, but the tool worked once). Give it the arguments that make a call one operation, or `"pass": true`.
+  twice, but the tool worked once). Give it the arguments that make a call one operation, `["*"]` for all of them,
+  or `"pass": true`.
 
-### Changed (`mcp`)
+### Added
+
+- `agentsafe-mcp inspect` (`mcp.Inspect`): lists a server's tools without calling any (read-only, destructive and
+  idempotent hints, an argument that looks like an idempotency key, required arguments) and suggests a starting
+  policy that fails closed: reads pass, writes get identity `["*"]`, a key argument if they have one, and approval
+  unless the server says they aren't destructive. `--policy-out` writes it as a policy file, never over an
+  existing one; `--json` prints the inspection; `--timeout` gives up on a server that never lists its tools.
+- `"identity": ["*"]` (`mcp.AllArguments`): every argument the call has is the operation. An exact repeat is
+  answered from the log, any difference is a new operation (never a conflict).
+- `agentsafe-mcp verify` checks every tool that changes something, not only keyed ones: one call must make exactly
+  one effect (`mcptest.OneEffect` / `CheckOneEffect`). Two effects means the server repeats the action inside a single
+  call, which no proxy can stop; none means `--count` counts the wrong thing. A policy without a key is now accepted
+  and reported as *not retry-safe*; with a key, the key checks follow as before.
+- `verify --settle 5s` waits before each count, for an API whose lists lag its writes (GitHub's do): counted at
+  once, an effect looked like none.
+- `verify --json` prints the verdict (`one_effect`, `same_key`, `retry_safe`) for collecting across servers.
+- `Duration` marshals as text ("10s"), and `Policy` omits empty fields: a policy written by Go loads back.
+
+### Changed
 
 - `verify` checks a keyed policy against the tool before making any call: a policy that doesn't fit the tool no
   longer costs a real effect.
+
+### Fixed
+
+- `LoadConfig` writes out the default key (`none`) for a policy that leaves `key` out. Before, `verify` read the
+  empty value as a key and refused such a policy (found running it against GitHub's server).
 
 ## [mcp/v0.3.0] - 2026-10-08
 
@@ -238,6 +247,7 @@ The first release: correctness primitives for LLM agents that act on money, hard
 
 [Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...v0.5.0
+[mcp/v0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.3.0...mcp/v0.4.0
 [mcp/v0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.2.0...mcp/v0.3.0
 [0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.2.0...v0.3.0
