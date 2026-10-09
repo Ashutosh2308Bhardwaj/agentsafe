@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/mcptest"
@@ -46,6 +47,7 @@ func verify(args []string) error {
 
 	var countErr error
 	effects := func() int {
+		time.Sleep(v.settle) // a count that lags the effect (an eventually consistent API) would hide one
 		n, err := runCount(ctx, v.count)
 		if err != nil && countErr == nil {
 			countErr = err
@@ -126,6 +128,7 @@ func report(r verdict, asJSON bool) error {
 type verifyArgs struct {
 	policy, tool, args, count string
 	json                      bool
+	settle                    time.Duration
 	upstream                  []string
 }
 
@@ -137,6 +140,7 @@ func parseVerify(args []string) (verifyArgs, error) {
 	fs.StringVar(&v.args, "args", "", "arguments of one operation, as JSON (required)")
 	fs.StringVar(&v.count, "count", "", "shell command printing how many effects exist so far, e.g. a SELECT count(*) (required)")
 	fs.BoolVar(&v.json, "json", false, "print the verdict as JSON")
+	fs.DurationVar(&v.settle, "settle", 0, "wait this long before each count, for an API whose lists lag its writes")
 	sandbox := fs.Bool("sandbox", false, "confirm the server is a sandbox: verify makes real calls, with real effects")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox [--json] -- COMMAND [ARGS...]")

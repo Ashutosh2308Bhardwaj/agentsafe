@@ -224,6 +224,7 @@ func TestVerifyingThatAServerHonoursItsKey(t *testing.T) {
 		{"one that takes the key and ignores it", "charge_ignores_key", "argument", true, false, "FAIL", `"charges":`},
 		{"not confirmed as a sandbox", "charge", "argument", false, false, "--sandbox", ``},
 		{"a policy that sends no key", "charge", "none", true, true, "Not retry-safe (key: none)", `"charges":1`},
+		{"a policy that leaves the key out", "charge", "", true, true, "Not retry-safe (key: none)", `"charges":1`},
 		{"two effects per call, no key", "charge_twice", "none", true, false, "one call made 2 effects", `"charges":2`},
 		{"two effects per call, with a key", "charge_twice", "meta", true, false, "one call made 2 effects", `"charges":2`},
 		{"a policy that doesn't fit the tool", "charge_twice", "argument", true, false, "no argument \"idempotency_key\"", ``},
@@ -232,6 +233,9 @@ func TestVerifyingThatAServerHonoursItsKey(t *testing.T) {
 			run := t.TempDir()
 			books, policy := filepath.Join(run, "books.json"), filepath.Join(run, "policy.json")
 			p := fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"],"key":%q}}}`, c.tool, c.key)
+			if c.key == "" { // as a person writes it: no key field at all
+				p = fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"]}}}`, c.tool)
+			}
 			if c.key == "argument" {
 				p = fmt.Sprintf(`{"tools":{%q:{"identity":["ticket_id"],"key":"argument","key_argument":"idempotency_key"}}}`, c.tool)
 			}
@@ -323,5 +327,26 @@ func TestInspectingAServer(t *testing.T) {
 	again, err := exec.Command(proxyBin, "inspect", "--policy-out", policy, "--", upstreamBin, "--state", books).CombinedOutput()
 	if err == nil || !strings.Contains(string(again), "file exists") {
 		t.Fatalf("an existing policy must never be overwritten: %s", again)
+	}
+}
+
+// An API whose lists lag its writes: counted at once, the charge isn't there yet and verify can't tell; --settle
+// waits before each count.
+func TestVerifyWaitsForACountThatLags(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	for settle, want := range map[string]string{"0s": "made no effect", "1500ms": "PASS"} {
+		run := t.TempDir()
+		books, policy := filepath.Join(run, "books.json"), filepath.Join(run, "policy.json")
+		if err := os.WriteFile(policy, []byte(`{"tools":{"charge":{"identity":["ticket_id"]}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, _ := exec.Command(proxyBin, "verify", "--sandbox", "--settle", settle, "--policy", policy, "--tool", "charge",
+			"--args", `{"ticket_id":"VERIFY-1","amount":"0.01"}`,
+			"--count", upstreamBin+" --state "+books+" --print-charges --lag 1s", "--", upstreamBin, "--state", books).CombinedOutput()
+		if !strings.Contains(string(out), want) {
+			t.Errorf("--settle %s: want %q in:\n%s", settle, want, out)
+		}
 	}
 }

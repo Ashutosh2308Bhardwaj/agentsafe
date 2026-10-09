@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/Ashutosh2308Bhardwaj/agentsafe/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,12 +20,22 @@ type books struct {
 	Seats   int               `json:"seats"`
 	Charges int               `json:"charges"` // what customers were actually billed: the number that must not double
 	Done    map[string]string `json:"done"`    // the answer per idempotency key
+	At      []int64           `json:"at"`      // when each charge was made (unix ns): for a count that lags
+}
+
+// charge books n charges now.
+func (b *books) charge(n int) {
+	for range n {
+		b.Charges++
+		b.At = append(b.At, time.Now().UnixNano())
+	}
 }
 
 func main() {
 	var mu sync.Mutex // the books are a file: one read-modify-write at a time
 	path := flag.String("state", "books.json", "file holding the books")
 	printCharges := flag.Bool("print-charges", false, "print how many charges the books hold, and exit (for --count)")
+	lag := flag.Duration("lag", 0, "with --print-charges: count only charges older than this, like a list that lags its writes")
 	flag.Parse()
 	load := func() books {
 		b := books{Seats: 10, Done: map[string]string{}}
@@ -41,7 +52,13 @@ func main() {
 		return os.WriteFile(*path, raw, 0o600)
 	}
 	if *printCharges {
-		fmt.Println(load().Charges)
+		b, n := load(), 0
+		for _, at := range b.At {
+			if time.Since(time.Unix(0, at)) >= *lag {
+				n++
+			}
+		}
+		fmt.Println(n)
 		return
 	}
 	reply := func(s string) *sdk.CallToolResult {
@@ -81,7 +98,7 @@ func main() {
 			if prev, ok := b.Done[in.Key]; ok && in.Key != "" {
 				return reply(prev), nil
 			}
-			b.Charges++
+			b.charge(1)
 			answer := fmt.Sprintf("charged %s (charge %d)", in.Amount, b.Charges)
 			if in.Key != "" {
 				b.Done[in.Key] = answer
@@ -95,7 +112,7 @@ func main() {
 			mu.Lock() // locked only so the count is exact: it ignores the key either way
 			defer mu.Unlock()
 			b := load()
-			b.Charges++
+			b.charge(1)
 			return reply(fmt.Sprintf("charged (charge %d)", b.Charges)), save(b)
 		})
 	s.AddTool(&sdk.Tool{Name: "charge_twice", Description: "Bill the customer; a bug books every charge twice",
@@ -105,7 +122,7 @@ func main() {
 			mu.Lock()
 			defer mu.Unlock()
 			b := load()
-			b.Charges += 2
+			b.charge(2)
 			return reply(fmt.Sprintf("charged (charge %d)", b.Charges)), save(b)
 		})
 	if err := s.Run(context.Background(), &sdk.StdioTransport{}); err != nil {

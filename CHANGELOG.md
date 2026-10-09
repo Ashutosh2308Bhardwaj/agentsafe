@@ -20,9 +20,14 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
   unless the server says they aren't destructive. `--policy-out` writes it as a policy file, never over an existing one; `--json` prints
   the inspection.
 - `Duration` marshals as text ("10s"), and `Policy` omits empty fields: a policy written by Go loads back.
+- `verify --settle 5s` waits before each count, for an API whose lists lag its writes (GitHub's do): counted at
+  once, an effect looked like none.
 - `verify --json` prints the verdict (`one_effect`, `same_key`, `retry_safe`) for collecting across servers.
 
 ### Fixed (`mcp`)
+
+- `LoadConfig` writes out the default key (`none`) for a policy that leaves `key` out. Before, `verify` read the
+  empty value as a key and refused such a policy (found running it against GitHub's server).
 
 - **A policy that protects a tool now requires `identity`**, and one without it is refused at startup. Before, a
   policy such as `{}`, `{"key": "none"}` or `{"approval": "never"}` made every call to the tool the same operation:

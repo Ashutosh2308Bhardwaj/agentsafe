@@ -35,5 +35,11 @@ func LoadConfig(path string) (Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
+	for name, p := range c.Tools {
+		if p.Key == "" {
+			p.Key = KeyNone // the default, written out: a policy reads the same to every caller
+			c.Tools[name] = p
+		}
+	}
 	return c, nil
 }
