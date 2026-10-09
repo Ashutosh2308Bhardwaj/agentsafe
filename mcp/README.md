@@ -1,6 +1,6 @@
 # agentsafe/mcp: an MCP proxy
 
-**Status: v0.4.0** ([the design](../docs/MCP_PROXY.md), what's built and what isn't). Requires agentsafe v0.5.0.
+**Status: v0.5.0** ([the design](../docs/MCP_PROXY.md), what's built and what isn't). Requires agentsafe v0.5.0.
 
 ```bash
 go install github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/cmd/agentsafe-mcp@latest

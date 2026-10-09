@@ -6,10 +6,14 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
-Fixes from an outside review of mcp/v0.4.0: a suggested policy no longer trusts what a server says about itself,
-and verify calls a tool exactly as the proxy does.
+## [mcp/v0.5.0] - 2026-10-09
 
-### Changed (breaking, `mcp`)
+`agentsafe/mcp` only: the core stays at v0.5.0. Fixes from an outside review of mcp/v0.4.0: a suggested policy no
+longer trusts what a server says about itself, and verify calls a tool exactly as the proxy does. **Upgrade from
+v0.4.0** if you used `inspect --policy-out`: re-run it, or remove any `"key": "argument"` it wrote until `verify`
+passes for that tool.
+
+### Changed (breaking)
 
 - **`inspect` never suggests a key.** v0.4.0 turned an argument named like an idempotency key (`request_id`,
   `client_token`) into `"key": "argument"`, which lets agentsafe retry an outcome it lost: safe only if the server
@@ -24,13 +28,13 @@ and verify calls a tool exactly as the proxy does.
   check it would pass in service. Arguments the proxy would refuse (a missing identity field) are refused before any
   call.
 
-### Added (`mcp`)
+### Added
 
 - `mcp.ProxiedTool`: a tool as the proxy calls it under a policy, built by the same code as `Open`'s.
 - `verify --timeout` (default 5m) bounds the whole run: a server or `--count` command that hangs ends it with an
   error.
 
-### Fixed (`mcp`)
+### Fixed
 
 - A `pass` policy's `timeout` is applied; it was accepted and ignored.
 - `Hidden()` and `Unprotected()` return copies.
@@ -277,6 +281,7 @@ The first release: correctness primitives for LLM agents that act on money, hard
 
 [Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...v0.5.0
+[mcp/v0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.4.0...mcp/v0.5.0
 [mcp/v0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.3.0...mcp/v0.4.0
 [mcp/v0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.2.0...mcp/v0.3.0
 [0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.3.0...v0.4.0
