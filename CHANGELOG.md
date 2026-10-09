@@ -6,7 +6,11 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
-### Fixed (`mcp`)
+## [mcp/v0.5.1] - 2026-10-09
+
+`agentsafe/mcp` only: the core stays at v0.5.0.
+
+### Fixed
 
 - `verify --timeout` now also ends a `--settle` wait: with `--settle 10m --timeout 5s`, the run slept the whole
   settle before noticing the timeout.
@@ -288,6 +292,7 @@ The first release: correctness primitives for LLM agents that act on money, hard
 
 [Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...v0.5.0
+[mcp/v0.5.1]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.5.0...mcp/v0.5.1
 [mcp/v0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.4.0...mcp/v0.5.0
 [mcp/v0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.3.0...mcp/v0.4.0
 [mcp/v0.3.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.2.0...mcp/v0.3.0
