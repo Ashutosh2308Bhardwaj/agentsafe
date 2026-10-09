@@ -105,7 +105,8 @@ With a policy for a tool:
   ```
 
   `--count` is any shell command printing how many effects exist (a `count(*)`, `curl … | jq length`). It makes real
-  calls, so it won't run without `--sandbox`; `--json` prints the verdict; `--timeout` (default 5m) ends a run whose
+  calls (for a keyed policy, 20 at once with one key: a server that doesn't deduplicate makes 20 effects), so it
+  won't run without `--sandbox`; `--json` prints the verdict; `--timeout` (default 5m) ends a run whose
   server or `--count` hangs. From Go: `mcptest.OneEffect`, `mcptest.SameKey`. It catches a server that ignores the key,
   and one that checks and then acts without a lock **when there's a real gap between the two** (a database read, then
   a payment API call): a race only microseconds wide can pass. A pass is strong evidence, not proof.

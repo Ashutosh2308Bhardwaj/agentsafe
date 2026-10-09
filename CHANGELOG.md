@@ -6,6 +6,13 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Fixed (`mcp`)
+
+- `verify --timeout` now also ends a `--settle` wait: with `--settle 10m --timeout 5s`, the run slept the whole
+  settle before noticing the timeout.
+- `verify`'s `--sandbox` warning says what a keyed check does: 20 calls at once with one key, so a server that
+  doesn't deduplicate makes that many real effects.
+
 ## [mcp/v0.5.0] - 2026-10-09
 
 `agentsafe/mcp` only: the core stays at v0.5.0. Fixes from an outside review of mcp/v0.4.0: a suggested policy no

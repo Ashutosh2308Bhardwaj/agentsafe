@@ -25,7 +25,8 @@ import (
 // A policy that sends a key: the server really deduplicates on it, one call after another and 20 at once
 // (mcptest.CheckSameKey). Without a key the tool isn't retry-safe, which verify reports: after a crash agentsafe
 // records the outcome as unknown and never retries it. Effects are counted by --count, a shell command that
-// prints a number. It makes real calls with real effects, so it refuses to run without --sandbox. --timeout bounds
+// prints a number. It makes real calls with real effects (for a keyed policy, tooltest.Concurrency of them at once
+// with one key: a server that doesn't deduplicate makes that many), so it refuses to run without --sandbox. --timeout bounds
 // the whole run, the server's calls and the counts.
 func verify(args []string) error {
 	v, err := parseVerify(args)
@@ -50,7 +51,11 @@ func verify(args []string) error {
 
 	var countErr error
 	effects := func() int {
-		time.Sleep(v.settle) // a count that lags the effect (an eventually consistent API) would hide one
+		// A count that lags the effect (an eventually consistent API) would hide one. The wait ends with the run:
+		// --timeout bounds it too.
+		if err := wait(ctx, v.settle); err != nil {
+			return 0 // the run is over: verify reports the timeout, not this count
+		}
 		n, err := runCount(ctx, v.count)
 		if err != nil && countErr == nil {
 			countErr = err
@@ -69,6 +74,21 @@ func verify(args []string) error {
 		return fmt.Errorf("counting effects: %w", countErr)
 	}
 	return report(r, v.json)
+}
+
+// wait sleeps for d, or until ctx ends (its error).
+func wait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // verdict is what verify found, also printed as JSON (--json) for collecting across servers.
@@ -146,7 +166,8 @@ func parseVerify(args []string) (verifyArgs, error) {
 	fs.BoolVar(&v.json, "json", false, "print the verdict as JSON")
 	fs.DurationVar(&v.settle, "settle", 0, "wait this long before each count, for an API whose lists lag its writes")
 	fs.DurationVar(&v.timeout, "timeout", 5*time.Minute, "give up on the whole run after this long (a server or --count that hangs)")
-	sandbox := fs.Bool("sandbox", false, "confirm the server is a sandbox: verify makes real calls, with real effects")
+	sandbox := fs.Bool("sandbox", false, fmt.Sprintf("confirm the server is a sandbox: verify makes real calls with real "+
+		"effects, %d of them at once with one key for a keyed policy", tooltest.Concurrency))
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: agentsafe-mcp verify --policy FILE --tool NAME --args JSON --count CMD --sandbox [--json] [--settle D] [--timeout D] -- COMMAND [ARGS...]")
 		fs.PrintDefaults()
@@ -160,7 +181,9 @@ func parseVerify(args []string) (verifyArgs, error) {
 		fs.Usage()
 		return v, errors.New("--policy, --tool, --args, --count and the upstream command are required")
 	case !*sandbox:
-		return v, errors.New("verify calls the tool for real: run it against a sandbox of the server, and say so with --sandbox")
+		return v, fmt.Errorf("verify calls the tool for real, and for a keyed policy %d times at once with one key: a "+
+			"server that doesn't deduplicate (what verify looks for) makes that many real effects. Run it against a "+
+			"sandbox of the server, and say so with --sandbox", tooltest.Concurrency)
 	case !json.Valid([]byte(v.args)):
 		return v, errors.New("--args isn't JSON")
 	}

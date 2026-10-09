@@ -368,3 +368,21 @@ func TestVerifyGivesUpOnACountThatHangs(t *testing.T) {
 		t.Fatalf("err=%v after %s:\n%s", err, time.Since(start), out)
 	}
 }
+
+// --timeout bounds --settle's wait too: the run ends near the timeout, not after the settle.
+func TestVerifyTimeoutInterruptsSettle(t *testing.T) {
+	dir := t.TempDir()
+	proxyBin := build(t, dir, "agentsafe-mcp", ".")
+	upstreamBin := build(t, dir, "fakeupstream", "../../internal/fakeupstream")
+	books, policy := filepath.Join(dir, "books.json"), filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policy, []byte(`{"tools":{"charge":{"identity":["ticket_id"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	out, err := exec.Command(proxyBin, "verify", "--sandbox", "--timeout", "500ms", "--settle", "30s", "--policy", policy,
+		"--tool", "charge", "--args", `{"ticket_id":"VERIFY-1"}`, "--count", upstreamBin+" --state "+books+" --print-charges",
+		"--", upstreamBin, "--state", books).CombinedOutput()
+	if took := time.Since(start); err == nil || !strings.Contains(string(out), "gave up after 500ms") || took > 10*time.Second {
+		t.Fatalf("err=%v after %s (want an error near 500ms, not 30s):\n%s", err, took, out)
+	}
+}

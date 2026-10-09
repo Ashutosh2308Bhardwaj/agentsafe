@@ -56,7 +56,8 @@ func TrustAnnotations() InspectOption { return func(o *inspectOptions) { o.trust
 // Inspect lists the upstream's tools and, for each, what it says about itself and a starting policy. It calls no
 // tool, so it's safe against any server.
 //
-// The suggestion fails closed, and a hint can only make it more careful: the server's word isn't proof. A write
+// The suggestion fails closed. By default a hint can only make it more careful, since the server's word isn't
+// proof; only TrustAnnotations lets hints relax it. A write
 // is identified by all its arguments (identity ["*"]), gets no key, and waits for approval. A tool marked
 // read-only gets no policy, so it stays hidden until someone reviews it (TrustAnnotations: it passes, and a
 // write marked not destructive needs no approval). No key, even for an argument named like one: a key lets
