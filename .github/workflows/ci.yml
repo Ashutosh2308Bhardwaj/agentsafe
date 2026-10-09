@@ -36,6 +36,8 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with: { version: latest }
       - name: staticcheck
+        # staticcheck 0.8.1 (the latest) can't read Go 1.27's export data: run it on 1.26 until a release does.
+        env: { GOTOOLCHAIN: go1.26.9 }
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -58,7 +60,9 @@ jobs:
       - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
         working-directory: .
         shell: bash
-        run: go work init . "./${{ matrix.module }}"
+        run: |
+          go work init . "./${{ matrix.module }}"
+          go work edit -go=1.26.0 # the highest any module needs, so staticcheck's older Go accepts it
       - run: go vet ./...
       - run: go test -race -count=1 ./...
   postgres:
@@ -103,11 +107,14 @@ jobs:
         with: { go-version: stable, cache-dependency-path: "${{ matrix.module }}/go.sum" }
       - name: use this commit's core, not the released one (a workspace; go.mod stays as users see it)
         shell: bash
-        run: go work init . "./${{ matrix.module }}"
+        run: |
+          go work init . "./${{ matrix.module }}"
+          go work edit -go=1.26.0 # the highest any module needs, so staticcheck's older Go accepts it
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with: { version: latest, working-directory: "${{ matrix.module }}", args: --config ../.golangci.yml }
       - name: staticcheck
         working-directory: ${{ matrix.module }}
+        env: { GOTOOLCHAIN: go1.26.9 } # see the quality job
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - name: govulncheck
         working-directory: ${{ matrix.module }}
