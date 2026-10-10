@@ -4,6 +4,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -12,6 +13,9 @@ func TestTheDemoChargesOnceThroughAgentsafe(t *testing.T) {
 	dir := t.TempDir()
 	bin := func(name, pkg string) string {
 		out := filepath.Join(dir, name)
+		if runtime.GOOS == "windows" {
+			out += ".exe"
+		}
 		if b, err := exec.Command("go", "build", "-o", out, pkg).CombinedOutput(); err != nil {
 			t.Fatalf("build %s: %v\n%s", pkg, err, b)
 		}
