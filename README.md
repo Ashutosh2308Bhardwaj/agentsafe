@@ -12,6 +12,32 @@ go get github.com/Ashutosh2308Bhardwaj/agentsafe
 
 I own a payouts platform that disburses ₹400M a month to 40,000+ people. The failure I've spent the most time on is the gateway timeout that arrives *after* the money moved. I wanted to know what that failure looks like when the caller is an LLM agent, so I built an agent, broke it deliberately, wrote down every failure I saw, and built this library from that list. Nothing in it is speculative: every primitive answers a failure I reproduced, and every guarantee below is a test or a run you can repeat.
 
+## See it in a minute (Go only, no credentials)
+
+An agent charges a customer through a billing MCP server, the answer is lost, and the agent asks again: straight to
+the server, then through `agentsafe-mcp`. The second scene kills the proxy mid-call.
+
+```bash
+git clone https://github.com/Ashutosh2308Bhardwaj/agentsafe && cd agentsafe && ./demo.sh
+```
+
+```
+1. The answer is lost on the way back, so the agent retries
+   Straight to the billing server:
+     call  → charged 10.00 (charge 1)
+     retry → charged 10.00 (charge 2)
+     customer charged 2 times ✗
+   Through agentsafe-mcp:
+     call  → charged 10.00 (charge 1)
+     retry → charged 10.00 (charge 1)   answered from agentsafe's log, not charged again
+     customer charged 1 time ✓
+
+2. agentsafe-mcp itself crashes after the charge, before the answer reaches the agent
+   ...
+     retry → outcome unknown: not retried, never guessed (check the billing system)
+     customer charged 1 time ✓
+```
+
 ## Quickstart (5 minutes, no API key)
 
 An agent that can pay an invoice **at most once**, and **only after a human approves**, surviving restarts in between:

@@ -6,6 +6,12 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+### Added
+
+- `./demo.sh`: a 1-minute demo with no credentials (Go only). An agent's charge, retried after a lost answer: twice
+  straight to a billing MCP server, once through `agentsafe-mcp`; and the proxy killed mid-call, then restarted.
+  `mcp/demo` checks the numbers in CI.
+
 ## [mcp/v0.5.1] - 2026-10-09
 
 `agentsafe/mcp` only: the core stays at v0.5.0.

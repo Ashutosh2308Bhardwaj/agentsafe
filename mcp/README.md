@@ -9,6 +9,10 @@ go install github.com/Ashutosh2308Bhardwaj/agentsafe/mcp/cmd/agentsafe-mcp@lates
 Put `agentsafe-mcp` in front of any MCP server in your agent's configuration, and every tool call goes through
 agentsafe first. The agent's code and the server don't change.
 
+To see what that does before installing anything: `./demo.sh` at the repository root (Go only, no credentials). A
+retry after a lost answer charges a customer twice straight to a billing server and once through `agentsafe-mcp`,
+and a crash mid-call is recorded as unknown, not guessed.
+
 ```jsonc
 // before
 { "command": "npx", "args": ["-y", "@acme/billing-mcp"] }
