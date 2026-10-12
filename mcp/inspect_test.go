@@ -70,7 +70,7 @@ func TestInspectSuggestsAPolicyPerTool(t *testing.T) {
 	}
 	got := summaries(in)
 	all := []string{mcp.AllArguments}
-	gated := &mcp.Policy{Identity: all, Key: mcp.KeyNone, Approval: "always"}
+	gated := &mcp.Policy{Identity: all, Key: mcp.KeyNone, ReplayWindow: window, Approval: "always"}
 	want := map[string]*mcp.Policy{
 		"get_order": nil, "create_refund": gated, "send_message": gated,
 		"update_address": gated, "delete_order": gated, "clear_cache": gated,
@@ -91,13 +91,16 @@ func TestTrustingTheAnnotations(t *testing.T) {
 	all := []string{mcp.AllArguments}
 	checkPolicies(t, summaries(in), map[string]*mcp.Policy{
 		"get_order":      {Pass: true},
-		"create_refund":  {Identity: all, Key: mcp.KeyNone, Approval: "always"},
-		"send_message":   {Identity: all, Key: mcp.KeyNone},
-		"update_address": {Identity: all, Key: mcp.KeyNone},
-		"delete_order":   {Identity: all, Key: mcp.KeyNone, Approval: "always"},
-		"clear_cache":    {Identity: all, Key: mcp.KeyNone, Approval: "always"},
+		"create_refund":  {Identity: all, Key: mcp.KeyNone, ReplayWindow: window, Approval: "always"},
+		"send_message":   {Identity: all, Key: mcp.KeyNone, ReplayWindow: window},
+		"update_address": {Identity: all, Key: mcp.KeyNone, ReplayWindow: window},
+		"delete_order":   {Identity: all, Key: mcp.KeyNone, ReplayWindow: window, Approval: "always"},
+		"clear_cache":    {Identity: all, Key: mcp.KeyNone, ReplayWindow: window, Approval: "always"},
 	})
 }
+
+// window is the replay window inspect writes for ["*"], so the policy file shows it.
+const window = mcp.Duration(mcp.DefaultReplayWindow)
 
 func summaries(in mcp.Inspection) map[string]mcp.ToolSummary {
 	got := map[string]mcp.ToolSummary{}

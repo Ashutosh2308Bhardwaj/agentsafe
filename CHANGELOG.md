@@ -11,6 +11,31 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 - `./demo.sh`: a 1-minute demo with no credentials (Go only). An agent's charge, retried after a lost answer: twice
   straight to a billing MCP server, once through `agentsafe-mcp`; and the proxy killed mid-call, then restarted.
   `mcp/demo` checks the numbers in CI.
+- Core: **`ReplayWindowTool`**. An `IdempotentTool` can say how long its operations are remembered. A repeat within
+  `ReplayWindow` of the recorded outcome is answered from the log. After it, the same identity is a new operation
+  with a new key (derived from the old one, so a restart derives the same), and a downstream that deduplicates on
+  the key acts on it too. An outcome recorded as unknown never expires: it may have happened. `Outcome` records `At`
+  and `Unknown`.
+- mcp: **`replay_window`** in a policy. `["*"]` defaults to 10 minutes (`DefaultReplayWindow`), and `inspect` writes
+  it into the policies it suggests; named identity fields default to the life of the log.
+
+### Fixed
+
+- mcp: with `"identity": ["*"]` (what `inspect` suggests for every write), a deliberate repeat was answered with the
+  first result for the life of the log, and nothing happened: the same comment on the same issue a week later, or a
+  second identical charge. It's now a new operation once the replay window has passed. Reported by Mike Dabydeen.
+- The README said `["*"]` means "nothing legitimate is ever refused". That was true but misleading: a deliberate
+  repeat wasn't refused, it was silently replayed.
+
+### Changed
+
+- Core: the Runner stamps each event's time before applying it, so the state and the log agree on when an outcome
+  was recorded; `Journal.Append` keeps a time the caller set.
+
+### Not changed
+
+- A rejected operation is still refused if asked for again, however long ago it was rejected: a decision belongs
+  to the operation, and expiring it would let re-asking undo a rejection.
 
 ## [mcp/v0.5.1] - 2026-10-09
 

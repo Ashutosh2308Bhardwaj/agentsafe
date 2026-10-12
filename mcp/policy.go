@@ -49,10 +49,19 @@ type Policy struct {
 	KeyArgument string `json:"key_argument,omitempty"`
 	// Timeout bounds one call; past it the outcome is unknown. 0: the gateway's.
 	Timeout Duration `json:"timeout,omitempty"`
+	// ReplayWindow is how long a completed operation is remembered (agentsafe.ReplayWindowTool): a repeat within it
+	// is answered from the log, and after it the same identity is a new operation. An unknown outcome never
+	// expires. 0: DefaultReplayWindow for ["*"], which is only a guess at what makes two calls one operation (the
+	// same comment on the same issue a week later is meant), and for the life of the log for named fields.
+	ReplayWindow Duration `json:"replay_window,omitempty"`
 	// Approval is "always" (every call waits for a human; it needs identity: a decision is addressed by the
 	// operation's key) or "never" (the default).
 	Approval string `json:"approval,omitempty"`
 }
+
+// DefaultReplayWindow is how long an operation identified by all its arguments (["*"]) is remembered unless its
+// policy says otherwise: long enough for a client's retries and a restart, short of a deliberate repeat.
+const DefaultReplayWindow = 10 * time.Minute
 
 // AllArguments is a policy's whole identity (["*"]) when every argument the call has identifies the operation.
 const AllArguments = "*"
@@ -99,8 +108,10 @@ func (p *Policy) check(t *sdk.Tool) error {
 // it every call is the same operation, so the tool would work once and refuse every other call as a conflict.
 func (p *Policy) consistent() error {
 	switch {
-	case p.Pass && (len(p.Identity) > 0 || p.Key != KeyNone || p.KeyArgument != "" || p.Approval == "always"):
-		return errors.New("pass forwards the tool unprotected: it can't have identity, a key or an approval")
+	case p.Pass && (len(p.Identity) > 0 || p.Key != KeyNone || p.KeyArgument != "" || p.Approval == "always" || p.ReplayWindow != 0):
+		return errors.New("pass forwards the tool unprotected: it can't have identity, a key, an approval or a replay window")
+	case p.ReplayWindow < 0:
+		return errors.New("replay_window can't be negative")
 	case !p.Pass && len(p.Identity) == 0:
 		return errors.New("identity is required: the arguments that make a call one operation (a refund's ticket_id), " +
 			"or [\"*\"] for all of them. Without it every call would be the same operation. Or \"pass\": true, to " +
@@ -230,6 +241,15 @@ func (t *gatedTool) Summary(args json.RawMessage) (any, error) {
 	return obj, nil
 }
 
+// ReplayWindow is how long a completed operation is remembered (agentsafe.ReplayWindowTool): the policy's, or
+// DefaultReplayWindow for ["*"]; 0, for the life of the log, for named fields.
+func (t *keyedTool) ReplayWindow() time.Duration {
+	if t.policy.ReplayWindow == 0 && t.policy.allArguments() {
+		return DefaultReplayWindow
+	}
+	return time.Duration(t.policy.ReplayWindow)
+}
+
 // Timeout is the policy's per-call timeout (agentsafe.TimeoutTool).
 func (t *keyedTool) Timeout() time.Duration { return time.Duration(t.policy.Timeout) }
 
@@ -267,7 +287,8 @@ func KeyedTool(ctx context.Context, upstream *sdk.ClientSession, name string, po
 }
 
 var (
-	_ agentsafe.TimeoutTool    = (*passTool)(nil)
-	_ agentsafe.IdempotentTool = (*keyedTool)(nil)
-	_ agentsafe.Gated          = (*gatedTool)(nil)
+	_ agentsafe.TimeoutTool      = (*passTool)(nil)
+	_ agentsafe.IdempotentTool   = (*keyedTool)(nil)
+	_ agentsafe.ReplayWindowTool = (*keyedTool)(nil)
+	_ agentsafe.Gated            = (*gatedTool)(nil)
 )

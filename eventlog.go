@@ -122,7 +122,7 @@ func (l *FileLog) journal() *Journal {
 	return l.j
 }
 
-// Append writes e as the next line. Seq, Time and Prev are set here.
+// Append writes e as the next line. Seq and Prev are set here, and Time unless e has one.
 func (l *FileLog) Append(ctx context.Context, e Event) error { return l.journal().Append(ctx, e) }
 
 // Read returns every acknowledged event in order, ignoring a torn tail. A missing file is an empty log.

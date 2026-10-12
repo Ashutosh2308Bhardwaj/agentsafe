@@ -108,7 +108,7 @@ func summarize(t *sdk.Tool, o inspectOptions) ToolSummary {
 			s.Required = append(s.Required, r)
 		}
 	}
-	p := &Policy{Identity: []string{AllArguments}, Key: KeyNone}
+	p := &Policy{Identity: []string{AllArguments}, Key: KeyNone, ReplayWindow: Duration(DefaultReplayWindow)}
 	if s.KeyArgument != "" {
 		s.Note = "candidate key " + s.KeyArgument + ": verify the server deduplicates on it (agentsafe-mcp verify), " +
 			"then set key: argument. Until then an outcome lost to a crash or timeout is unknown, never retried"

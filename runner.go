@@ -46,7 +46,8 @@ type Runner struct {
 	// running a run from two processes at once must be a visible choice, not a silent gap.
 	Unlocked bool
 
-	last Event // the last event emit wrote: how a Gateway learns what became of a call
+	last Event            // the last event emit wrote: how a Gateway learns what became of a call
+	now  func() time.Time // the clock events are stamped with; nil = time.Now (tests set it)
 }
 
 // Start begins a new run. It refuses a log that already has events.
@@ -184,6 +185,7 @@ func (r *Runner) loop(ctx context.Context, st State) (State, error) {
 func (r *Runner) step(ctx context.Context, st *State, c ToolCall) error {
 	tool := r.find(c.Function.Name)
 	key, ph := r.operation(tool, c, st.KeyBits)
+	key = r.current(st, tool, key)
 	if prev, seen := st.Effects[key]; key != "" && seen {
 		return r.answerFromLog(ctx, st, c, key, ph, prev) // the log has seen this operation finish: nothing runs
 	}
@@ -296,7 +298,7 @@ func (r *Runner) find(name string) Tool {
 // emit validates the event against the state machine, THEN persists it, THEN applies it. An event the
 // state machine rejects is never written; an event that fails to write never changes the state.
 func (r *Runner) emit(ctx context.Context, st *State, e Event) error {
-	e.V = FormatVersion
+	e.V, e.Time = FormatVersion, r.clock() // stamped before it's applied: the state sees the time the log records
 	check := *st
 	check.Started = copyMap(st.Started)
 	check.Pending = append([]ToolCall(nil), st.Pending...)
@@ -319,6 +321,13 @@ func (r *Runner) emit(ctx context.Context, st *State, e Event) error {
 	*st = check
 	r.last = e
 	return nil
+}
+
+func (r *Runner) clock() time.Time {
+	if r.now != nil {
+		return r.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (r *Runner) specs() []ToolSpec {

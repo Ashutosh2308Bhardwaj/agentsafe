@@ -3,6 +3,8 @@ package agentsafe
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 )
 
 // Status is where a run is. Every status is derived from the log; none is stored.
@@ -68,6 +70,8 @@ type Waiting struct {
 type Outcome struct {
 	PayloadHash string
 	Result      string
+	At          time.Time // when it was recorded: a ReplayWindowTool's window runs from here
+	Unknown     bool      // recorded as an unknown outcome (ErrOutcomeUnknown): it may have happened, so it never expires
 }
 
 // NewState is the state of a run with no events.
@@ -258,7 +262,7 @@ func (s *State) toolResult(e Event) error {
 		if _, dup := s.Effects[e.Key]; dup {
 			return fmt.Errorf("second executed result for idempotency key %s", e.Key)
 		}
-		s.Effects[e.Key] = Outcome{PayloadHash: e.PayloadHash, Result: e.Result}
+		s.Effects[e.Key] = Outcome{PayloadHash: e.PayloadHash, Result: e.Result, At: e.Time, Unknown: unknownResult(e.Result)}
 	}
 	s.removePending(e.CallID)
 	delete(s.Started, e.CallID)
@@ -266,6 +270,16 @@ func (s *State) toolResult(e Event) error {
 		s.Status = s.idle()
 	}
 	return nil
+}
+
+// unknownResult is whether a result is the runner's record of an unknown outcome (recordUnknown): an error whose
+// text is ErrOutcomeUnknown's. A tool result that happens to say the same is treated alike, which only means it
+// never expires.
+func unknownResult(result string) bool {
+	var m struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal([]byte(result), &m) == nil && strings.HasPrefix(m.Error, ErrOutcomeUnknown.Error())
 }
 
 // toolRefused applies tool_refused: a pending call resolved without being attempted (never one that started).

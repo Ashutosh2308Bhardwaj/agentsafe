@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // IdempotentTool is a tool with a side effect that must happen at most once per operation.
@@ -49,6 +50,34 @@ type KeyHonouring interface {
 func honoursKey(t Tool) bool {
 	kh, ok := t.(KeyHonouring)
 	return !ok || kh.HonoursKey()
+}
+
+// ReplayWindowTool is implemented by an IdempotentTool whose operations are remembered only for a while. A repeat
+// within ReplayWindow of the recorded outcome is answered from the log; after it, the same identity is a new
+// operation, with a new key (so a downstream that deduplicates on the key acts on it too). Without a window, an
+// identity that isn't unique to one operation (every argument, say) answers a deliberate repeat a week later with
+// the first result, and nothing happens. An outcome recorded as unknown never expires: it may have happened, and
+// expiring it would retry it. 0 means the operation is remembered for the life of the log.
+type ReplayWindowTool interface {
+	ReplayWindow() time.Duration
+}
+
+// current is the key a call to tool is answered under: the operation's key, or, past an outcome the tool's replay
+// window has expired, the key of the next operation with the same identity (each derived from the last, so a
+// restart derives the same ones from the log).
+func (r *Runner) current(st *State, tool Tool, key string) string {
+	rw, ok := tool.(ReplayWindowTool)
+	if key == "" || !ok || rw.ReplayWindow() <= 0 {
+		return key
+	}
+	now := r.clock()
+	for {
+		prev, seen := st.Effects[key]
+		if !seen || prev.Unknown || now.Sub(prev.At) < rw.ReplayWindow() {
+			return key
+		}
+		key = hash(st.KeyBits, "again", key)
+	}
 }
 
 // Canonical is the JSON used for hashing: object keys sorted, numbers normalised (4200 == 4200.0).

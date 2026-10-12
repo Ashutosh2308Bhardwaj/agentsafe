@@ -50,7 +50,8 @@ type Journal struct {
 	prev string // chain link for the next line
 }
 
-// Append writes e as the next event. Seq, Time and Prev are set here.
+// Append writes e as the next event. Seq and Prev are set here, and Time unless the caller set it (the Runner
+// does, so its state and its log agree on when an outcome was recorded).
 func (j *Journal) Append(ctx context.Context, e Event) error {
 	if j.next == 0 {
 		events, lines, err := j.load(ctx)
@@ -59,7 +60,10 @@ func (j *Journal) Append(ctx context.Context, e Event) error {
 		}
 		j.next, j.prev = len(events)+1, j.link(last(lines))
 	}
-	e.Seq, e.Time, e.Prev = j.next, time.Now().UTC(), j.prev
+	e.Seq, e.Prev = j.next, j.prev
+	if e.Time.IsZero() {
+		e.Time = time.Now().UTC()
+	}
 	if j.Codec != nil {
 		var err error
 		if e, err = SealEvent(ctx, e, j.Codec); err != nil {
