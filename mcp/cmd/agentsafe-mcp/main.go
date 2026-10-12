@@ -45,7 +45,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const version = "0.3.0"
+const version = "0.6.0"
 
 func main() {
 	var err error

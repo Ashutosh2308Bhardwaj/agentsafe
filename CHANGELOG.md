@@ -6,21 +6,28 @@ Each module is versioned and tagged separately: `v0.1.0` is the core (`github.co
 
 ## [Unreleased]
 
+## [mcp/v0.6.0] - 2026-10-12
+
+`agentsafe/mcp` with core v0.6.0. **Upgrade** if you use `"identity": ["*"]` (every policy `inspect` writes): a
+repeat after 10 minutes is now a new operation instead of the first answer replayed. Set `"replay_window"` to
+change it.
+
 ### Added
 
 - `./demo.sh`: a 1-minute demo with no credentials (Go only). An agent's charge, retried after a lost answer: twice
   straight to a billing MCP server, once through `agentsafe-mcp`; and the proxy killed mid-call, then restarted.
   `mcp/demo` checks the numbers in CI.
-- mcp: **`replay_window`** in a policy. `["*"]` defaults to 10 minutes (`DefaultReplayWindow`), and `inspect` writes
+- **`replay_window`** in a policy. `["*"]` defaults to 10 minutes (`DefaultReplayWindow`), and `inspect` writes
   it into the policies it suggests; named identity fields default to the life of the log.
 
 ### Fixed
 
-- mcp: with `"identity": ["*"]` (what `inspect` suggests for every write), a deliberate repeat was answered with the
+- With `"identity": ["*"]` (what `inspect` suggests for every write), a deliberate repeat was answered with the
   first result for the life of the log, and nothing happened: the same comment on the same issue a week later, or a
   second identical charge. It's now a new operation once the replay window has passed. Reported by Mike Dabydeen.
 - The mcp README said `["*"]` means "nothing legitimate is ever refused". That was true but misleading: a deliberate
   repeat wasn't refused, it was silently replayed.
+- `agentsafe-mcp` reported itself as version 0.3.0 to clients and servers since mcp/v0.3.0; it now says 0.6.0.
 
 ## [0.6.0] - 2026-10-12
 
@@ -333,6 +340,7 @@ The first release: correctness primitives for LLM agents that act on money, hard
 [Unreleased]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.6.0...HEAD
 [0.6.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/v0.4.0...v0.5.0
+[mcp/v0.6.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.5.1...mcp/v0.6.0
 [mcp/v0.5.1]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.5.0...mcp/v0.5.1
 [mcp/v0.5.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.4.0...mcp/v0.5.0
 [mcp/v0.4.0]: https://github.com/Ashutosh2308Bhardwaj/agentsafe/compare/mcp/v0.3.0...mcp/v0.4.0
