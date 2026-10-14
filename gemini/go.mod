@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0
-	google.golang.org/genai v1.72.0
+	google.golang.org/genai v1.73.0
 )
 
 require (

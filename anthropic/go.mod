@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0
-	github.com/anthropics/anthropic-sdk-go v1.78.0
+	github.com/anthropics/anthropic-sdk-go v1.80.0
 )
 
 require (
