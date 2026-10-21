@@ -3,8 +3,8 @@ module github.com/Ashutosh2308Bhardwaj/agentsafe/gemini
 go 1.26.0
 
 require (
-	github.com/Ashutosh2308Bhardwaj/agentsafe v0.5.0
-	google.golang.org/genai v1.72.0
+	github.com/Ashutosh2308Bhardwaj/agentsafe v0.6.0
+	google.golang.org/genai v1.75.0
 )
 
 require (
